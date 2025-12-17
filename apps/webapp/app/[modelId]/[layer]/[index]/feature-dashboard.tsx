@@ -6,6 +6,7 @@ import ExplanationScoreDetailDialog from '@/components/explanation-score-detail-
 import FeatureSelector from '@/components/feature-selector/feature-selector';
 import FeatureStats from '@/components/feature-stats';
 import CommentsPane from '@/components/panes/comments-pane';
+import ConnectedNeuronsPane from '@/components/panes/connected-neurons-pane';
 import CosSimPane from '@/components/panes/cossim-pane';
 import EmbedsPane from '@/components/panes/embeds-pane';
 import ExplanationsPane from '@/components/panes/explanations-pane';
@@ -234,6 +235,9 @@ export default function FeatureDashboard({
         >
           {/* === EXPLANATIONS */}
           <ExplanationsPane currentNeuron={currentNeuron} setCurrentNeuron={setCurrentNeuron} />
+
+          {/* === CONNECTED NEURONS */}
+          <ConnectedNeuronsPane currentNeuron={currentNeuron} />
 
           {/* === COS SIM */}
           <CosSimPane currentNeuron={currentNeuron} />
