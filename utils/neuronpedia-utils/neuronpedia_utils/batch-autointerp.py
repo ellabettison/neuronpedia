@@ -29,12 +29,12 @@ logging.getLogger("neuron_explainer").setLevel(logging.CRITICAL)
 
 # openai requires us to set the openai api key before the neuron_explainer imports
 dotenv.load_dotenv()
+# Note: OPENAI_API_KEY check is deferred to main() when --generate-embeddings is True
 from neuron_explainer.activations.activation_records import calculate_max_activation
 
 # ruff: noqa: E402
 # flake8: noqa: E402
 from neuron_explainer.activations.activations import ActivationRecord
-from neuron_explainer.api_client import ApiClient
 from neuron_explainer.explanations.explainer import (
     AttentionHeadExplainer,
     MaxActivationAndLogitsExplainer,
@@ -51,6 +51,8 @@ if UPLOAD_EXPLANATION_AUTHORID is None:
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_EMBEDDING_DIMENSIONS = 256
 
+TIMEOUT_SECONDS = 15
+
 VALID_EXPLAINER_TYPE_NAMES = [
     "oai_token-act-pair",
     "oai_attention-head",
@@ -59,15 +61,33 @@ VALID_EXPLAINER_TYPE_NAMES = [
     "np_acts-logits-general",
 ]
 
+VALID_API_PROVIDERS = ["openai", "openrouter", "gemini"]
+
+# Global variable set by command-line argument
+API_PROVIDER = "openrouter"
+
 # you can change this yourself if you want to experiment with other models
 VALID_EXPLAINER_MODEL_NAMES = [
     "gpt-4o-mini",
     "gpt-4.1-nano",
+    "gpt-5-nano-2025-08-07",
+    "gpt-5-mini-2025-08-07",
+    "gpt-5-nano",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "openai/gpt-oss-120b",
+    "google/gemini-2.5-flash-lite",
 ]
+
+# OPENAI SUPPORT (default OpenAI API)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+# OPENROUTER SUPPORT
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # GEMINI SUPPORT
 GEMINI_MODEL_NAMES = [
@@ -79,13 +99,13 @@ GEMINI_MODEL_NAMES = [
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # we should use this one (ai studio, simpler) but we're super rate limited
-GEMINI_BASE_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
-GEMINI_VERTEX = False
+# GEMINI_BASE_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+# GEMINI_VERTEX = False
 # so we use vertex instead. when we are not rate limited on AI studio, remove the following 4 properties
-# GEMINI_PROJECT_ID = os.getenv("GEMINI_PROJECT_ID")
-# GEMINI_LOCATION = os.getenv("GEMINI_LOCATION")
-# GEMINI_BASE_API_URL = f"https://{GEMINI_LOCATION}-aiplatform.googleapis.com/v1beta1/projects/{GEMINI_PROJECT_ID}/locations/{GEMINI_LOCATION}/endpoints/openapi"
-# GEMINI_VERTEX = True
+GEMINI_PROJECT_ID = os.getenv("GEMINI_PROJECT_ID")
+GEMINI_LOCATION = os.getenv("GEMINI_LOCATION")
+GEMINI_BASE_API_URL = f"https://{GEMINI_LOCATION}-aiplatform.googleapis.com/v1beta1/projects/{GEMINI_PROJECT_ID}/locations/{GEMINI_LOCATION}/endpoints/openapi"
+GEMINI_VERTEX = True
 
 # the following two are overwritten by the command line arguments
 # the number of parallel autointerps to do
@@ -98,7 +118,7 @@ GEMINI_VERTEX = False
 # consider setting these on your machine for higher performance
 # ulimit -n 32768
 # sudo sysctl -w net.inet.tcp.sendspace=2097152 net.inet.tcp.recvspace=2097152
-AUTOINTERP_BATCH_SIZE = 128
+AUTOINTERP_BATCH_SIZE = 256
 
 # overridden by command line arguments
 # the number of top activations to feed the explainer per feature
@@ -140,6 +160,7 @@ FAILED_FEATURE_INDEXES_OUTPUT: List[str] = []
 
 IGNORE_FIRST_N_TOKENS: int = 0
 GENERATE_EMBEDDINGS: bool = True
+FRAC_NONZERO_THRESHOLD: float = 0.000001
 
 
 def normalize_s3_path(path: str) -> str:
@@ -240,21 +261,31 @@ async def call_autointerp_openai_for_activations(
 
     feature_index = top_activation.index
 
-    # only needed for vertex
-    if GEMINI_VERTEX:
-        model_name = (
-            "google/" + EXPLAINER_MODEL_NAME
-            if is_gemini_model(EXPLAINER_MODEL_NAME)
-            else EXPLAINER_MODEL_NAME
-        )
-    else:
+    # Determine API configuration based on API_PROVIDER
+    if API_PROVIDER == "openai":
         model_name = EXPLAINER_MODEL_NAME
-    base_api_url = (
-        GEMINI_BASE_API_URL
-        if is_gemini_model(EXPLAINER_MODEL_NAME)
-        else ApiClient.BASE_API_URL
-    )
-    override_api_key = GEMINI_API_KEY if is_gemini_model(EXPLAINER_MODEL_NAME) else None
+        base_api_url = OPENAI_BASE_URL
+        override_api_key = OPENAI_API_KEY
+    elif API_PROVIDER == "openrouter":
+        model_name = EXPLAINER_MODEL_NAME
+        base_api_url = OPENROUTER_BASE_URL
+        override_api_key = OPENROUTER_API_KEY
+    elif API_PROVIDER == "gemini":
+        # only needed for vertex
+        if GEMINI_VERTEX:
+            model_name = (
+                "google/" + EXPLAINER_MODEL_NAME
+                if is_gemini_model(EXPLAINER_MODEL_NAME)
+                else EXPLAINER_MODEL_NAME
+            )
+        else:
+            model_name = EXPLAINER_MODEL_NAME
+        base_api_url = GEMINI_BASE_API_URL
+        override_api_key = GEMINI_API_KEY
+    else:
+        raise ValueError(
+            f"Invalid API_PROVIDER: {API_PROVIDER}. Must be 'openai', 'openrouter', or 'gemini'."
+        )
 
     global FAILED_FEATURE_INDEXES_OUTPUT
 
@@ -284,7 +315,7 @@ async def call_autointerp_openai_for_activations(
                     num_samples=1,
                     reasoning_effort=REASONING_EFFORT,
                 ),
-                timeout=20,
+                timeout=TIMEOUT_SECONDS,
             )
         elif EXPLAINER_TYPE_NAME == "oai_token-act-pair":
             for activation in activations_sorted_by_max_value:
@@ -308,7 +339,7 @@ async def call_autointerp_openai_for_activations(
                     num_samples=1,
                     reasoning_effort=REASONING_EFFORT,
                 ),
-                timeout=20,
+                timeout=TIMEOUT_SECONDS,
             )
         elif EXPLAINER_TYPE_NAME == "np_acts-logits-general":
             for activation in activations_sorted_by_max_value:
@@ -336,7 +367,7 @@ async def call_autointerp_openai_for_activations(
                         num_samples=1,
                         reasoning_effort=REASONING_EFFORT,
                     ),
-                    timeout=20,
+                    timeout=TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 print(
@@ -374,7 +405,7 @@ async def call_autointerp_openai_for_activations(
                         num_samples=1,
                         reasoning_effort=REASONING_EFFORT,
                     ),
-                    timeout=20,
+                    timeout=TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 print(
@@ -409,7 +440,7 @@ async def call_autointerp_openai_for_activations(
                         num_samples=1,
                         reasoning_effort=REASONING_EFFORT,
                     ),
-                    timeout=20,
+                    timeout=TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 print(
@@ -471,7 +502,7 @@ async def call_autointerp_openai_for_activations(
                     index=str(feature_index),
                     description=explanation,
                     typeName=EXPLAINER_TYPE_NAME,
-                    explanationModelName=EXPLAINER_MODEL_NAME,
+                    explanationModelName=EXPLAINER_MODEL_NAME.split("/")[-1],
                     authorId=UPLOAD_EXPLANATION_AUTHORID or "",
                 )
             )
@@ -487,7 +518,7 @@ async def call_autointerp_openai_for_activations(
                 index=str(feature_index),
                 description=explanation,
                 typeName=EXPLAINER_TYPE_NAME,
-                explanationModelName=EXPLAINER_MODEL_NAME,
+                explanationModelName=EXPLAINER_MODEL_NAME.split("/")[-1],
                 authorId=UPLOAD_EXPLANATION_AUTHORID or "",
             )
         )
@@ -600,6 +631,13 @@ async def start(activations_dir: str):
                     if index not in features_by_index:
                         # print(f"Skipping activation {index} because it's not in features_by_index {features_by_index}")
                         continue
+                    # skip features with frac_nonzero below threshold
+                    feature = features_by_index[index]
+                    if feature.frac_nonzero < FRAC_NONZERO_THRESHOLD:
+                        # print(
+                        #     f"Skipping feature {index} due to low frac_nonzero: {feature.frac_nonzero} < {FRAC_NONZERO_THRESHOLD}"
+                        # )
+                        continue
                     task = asyncio.create_task(
                         enqueue_autointerp_openai_task_with_activations(
                             activations_by_index[index],
@@ -626,6 +664,7 @@ async def start(activations_dir: str):
 class AutoInterpConfig:
     input_dir_with_source_exports: str
     s3_exports_path: str | None
+    api_provider: str
     start_index: int
     end_index: int | None
     explainer_model_name: str
@@ -636,6 +675,7 @@ class AutoInterpConfig:
     gzip_output: bool
     ignore_first_n_tokens: int
     generate_embeddings: bool
+    frac_nonzero_threshold: float
 
 
 def is_gemini_model(model_name: str) -> bool:
@@ -650,6 +690,10 @@ def main(
     s3_exports_path: str | None = typer.Option(
         None,
         help=f"S3 path in the {S3_BUCKET_NAME} bucket (e.g., 'v1/model/layer'). Will be downloaded to a local temp directory. Either this or --input-dir-with-source-exports must be provided.",
+    ),
+    api_provider: str = typer.Option(
+        "openrouter",
+        help="API provider to use: 'openai', 'openrouter', or 'gemini'",
     ),
     start_index: int = typer.Option(
         0, help="The starting index to process", prompt=True
@@ -701,6 +745,10 @@ def main(
         help="Whether to generate OpenAI embeddings for explanations. If False, skips embedding generation and doesn't require OPENAI_API_KEY.",
         prompt=True,
     ),
+    frac_nonzero_threshold: float = typer.Option(
+        0.000001,
+        help="Minimum frac_nonzero threshold for a feature. Features below this threshold will be skipped.",
+    ),
 ):
     if explainer_type_name not in VALID_EXPLAINER_TYPE_NAMES:
         raise ValueError(f"Invalid explainer type name: {explainer_type_name}")
@@ -708,9 +756,34 @@ def main(
     if explainer_model_name not in VALID_EXPLAINER_MODEL_NAMES:
         raise ValueError(f"Invalid explainer model name: {explainer_model_name}")
 
-    if is_gemini_model(explainer_model_name) and GEMINI_API_KEY is None:
+    if api_provider not in VALID_API_PROVIDERS:
         raise ValueError(
-            "GEMINI_API_KEY is not set even though you're using a Gemini model"
+            f"Invalid API provider: {api_provider}. Must be one of: {VALID_API_PROVIDERS}"
+        )
+
+    # Set global API_PROVIDER from argument
+    global API_PROVIDER
+    API_PROVIDER = api_provider
+
+    # Check API key based on which provider is being used
+    if API_PROVIDER == "openai":
+        if OPENAI_API_KEY is None:
+            raise ValueError(
+                "OPENAI_API_KEY is not set even though API_PROVIDER is 'openai'"
+            )
+    elif API_PROVIDER == "openrouter":
+        if OPENROUTER_API_KEY is None:
+            raise ValueError(
+                "OPENROUTER_API_KEY is not set even though API_PROVIDER is 'openrouter'"
+            )
+    elif API_PROVIDER == "gemini":
+        if is_gemini_model(explainer_model_name) and GEMINI_API_KEY is None:
+            raise ValueError(
+                "GEMINI_API_KEY is not set even though you're using a Gemini model"
+            )
+    else:
+        raise ValueError(
+            f"Invalid API_PROVIDER: {API_PROVIDER}. Must be 'openai', 'openrouter', or 'gemini'."
         )
 
     global \
@@ -726,7 +799,8 @@ def main(
         GZIP_OUTPUT, \
         IGNORE_FIRST_N_TOKENS, \
         REASONING_EFFORT, \
-        GENERATE_EMBEDDINGS
+        GENERATE_EMBEDDINGS, \
+        FRAC_NONZERO_THRESHOLD
 
     GENERATE_EMBEDDINGS = generate_embeddings
     if GENERATE_EMBEDDINGS and not os.getenv("OPENAI_API_KEY"):
@@ -789,6 +863,7 @@ def main(
     )
     AUTOINTERP_BATCH_SIZE = autointerp_batch_size
     IGNORE_FIRST_N_TOKENS = ignore_first_n_tokens
+    FRAC_NONZERO_THRESHOLD = frac_nonzero_threshold
     EXPLANATIONS_OUTPUT_DIR = output_dir
     if not EXPLANATIONS_OUTPUT_DIR:
         EXPLANATIONS_OUTPUT_DIR = os.path.join(
@@ -803,6 +878,7 @@ def main(
     config = AutoInterpConfig(
         input_dir_with_source_exports=INPUT_DIR_WITH_SOURCE_EXPORTS,
         s3_exports_path=s3_exports_path,
+        api_provider=API_PROVIDER,
         start_index=START_INDEX,
         end_index=END_INDEX,
         explainer_model_name=EXPLAINER_MODEL_NAME,
@@ -813,6 +889,7 @@ def main(
         gzip_output=gzip_output,
         ignore_first_n_tokens=IGNORE_FIRST_N_TOKENS,
         generate_embeddings=GENERATE_EMBEDDINGS,
+        frac_nonzero_threshold=FRAC_NONZERO_THRESHOLD,
     )
 
     print("Auto-Interp Config\n", json.dumps(asdict(config), indent=2))
