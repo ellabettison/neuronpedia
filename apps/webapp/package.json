@@ -110,7 +110,7 @@
     "neuronpedia-inference-client": "^1.9.1",
     "next": "14.2.35",
     "next-auth": "^4.22.1",
-    "next-mdx-remote": "^5.0.0",
+    "next-mdx-remote": "^6.0.0",
     "next-nprogress-bar": "^2.3.11",
     "next-swagger-doc": "^0.4.0",
     "node-gzip": "^1.1.2",
