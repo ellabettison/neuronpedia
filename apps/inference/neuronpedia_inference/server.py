@@ -11,6 +11,16 @@ from typing import Callable
 import sentry_sdk
 import torch
 from dotenv import load_dotenv
+
+# vLLM only available on Linux
+try:
+    from chatspace.generation import VLLMSteeringConfig, VLLMSteerModel
+
+    VLLM_AVAILABLE = True
+except ImportError:
+    VLLMSteeringConfig = None  # type: ignore[misc, assignment]
+    VLLMSteerModel = None  # type: ignore[misc, assignment]
+    VLLM_AVAILABLE = False
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -21,6 +31,11 @@ from transformer_lens.hook_points import HookPoint
 
 # from transformer_lens.model_bridge.sources.transformers import boot
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+if VLLM_AVAILABLE:
+    from vllm import SamplingParams
+else:
+    SamplingParams = None  # type: ignore[misc, assignment]
 
 from neuronpedia_inference.args import list_available_options, parse_env_and_args
 from neuronpedia_inference.config import Config, get_saelens_neuronpedia_directory_df
@@ -45,6 +60,10 @@ from neuronpedia_inference.endpoints.activation.topk_by_token import (
 from neuronpedia_inference.endpoints.activation.topk_by_token_batch import (
     router as activation_topk_by_token_batch_router,
 )
+from neuronpedia_inference.endpoints.persona.monitor import (
+    router as persona_monitor_router,
+)
+from neuronpedia_inference.endpoints.persona.utils import initialize_persona_data
 from neuronpedia_inference.endpoints.steer.completion import (
     router as steer_completion_router,
 )
@@ -67,6 +86,11 @@ from neuronpedia_inference.shared import (  # noqa: F401
     replace_tlens_model_id_with_hf_model_id,
 )
 from neuronpedia_inference.utils import checkCudaError
+
+# Chatspace Consts
+# llama 3.3 70b awq (quantized) = 1 H200, 0.9
+CHATSPACE_NUM_GPUS = 1
+CHATSPACE_GPU_MEMORY_UTILIZATION = 0.9
 
 # Initialize logging at module level
 initialize_logging()
@@ -123,6 +147,7 @@ v1_router.include_router(sae_vector_router)
 v1_router.include_router(tokenize_router)
 v1_router.include_router(similarity_matrix_pred_router)
 v1_router.include_router(activation_source_router)
+v1_router.include_router(persona_monitor_router)
 app.include_router(v1_router)
 
 
@@ -146,23 +171,23 @@ async def initialize(
         df = get_saelens_neuronpedia_directory_df()
         models = df["model"].unique()
         sae_sets = df["neuronpedia_set"].unique()
-        if args.model_id not in models:
-            logger.error(
-                f"Error: Invalid model_id '{args.model_id}'. Use --list_models to see available options."
-            )
-            exit(1)
+        # if args.model_id not in models:
+        #     logger.error(
+        #         f"Error: Invalid model_id '{args.model_id}'. Use --list_models to see available options."
+        #     )
+        #     exit(1)
         # iterate through sae_sets and split them by spaces
         args_sae_sets = []
         for sae_set in args.sae_sets:
             args_sae_sets.extend(sae_set.split())
         logger.info("SAE sets: %s", args_sae_sets)
-        logger.info("Checking for invalid SAE sets...")
-        invalid_sae_sets = set(args_sae_sets) - set(sae_sets)
-        if invalid_sae_sets:
-            logger.error(
-                f"Error: Invalid SAE set(s): {', '.join(invalid_sae_sets)}. Use --list_models to see available options."
-            )
-            exit(1)
+        # logger.info("Checking for invalid SAE sets...")
+        # invalid_sae_sets = set(args_sae_sets) - set(sae_sets)
+        # if invalid_sae_sets:
+        #     logger.error(
+        #         f"Error: Invalid SAE set(s): {', '.join(invalid_sae_sets)}. Use --list_models to see available options."
+        #     )
+        #     exit(1)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -192,15 +217,50 @@ async def initialize(
             model_from_pretrained_kwargs=args.model_from_pretrained_kwargs,
             max_loaded_saes=args.max_loaded_saes,
             nnsight=args.nnsight,
+            chatspace=args.chatspace,
         )
         Config._instance = config
 
         if args.nnsight:
             logger.info("Loading model with nnterp...")
 
+            model_to_load = (
+                config.override_model_id
+                if config.override_model_id
+                else config.model_id
+            )
+            logger.info("Model to load: %s", model_to_load)
             model = StandardizedTransformer(
-                replace_tlens_model_id_with_hf_model_id(config.model_id),
+                replace_tlens_model_id_with_hf_model_id(model_to_load),
                 dtype=STR_TO_DTYPE[config.model_dtype],
+                trust_remote_code=True,
+            )
+        elif args.chatspace:
+            if not VLLM_AVAILABLE:
+                raise RuntimeError(
+                    "chatspace mode requires vLLM, which is only available on Linux. "
+                    "Use a different model loading mode on macOS."
+                )
+            logger.info("Loading model with chatspace VLLM...")
+            model_to_load = (
+                config.override_model_id
+                if config.override_model_id
+                else config.model_id
+            )
+            logger.info("Model to load: %s", model_to_load)
+            cfg = VLLMSteeringConfig(
+                model_name=replace_tlens_model_id_with_hf_model_id(model_to_load),
+                tensor_parallel_size=CHATSPACE_NUM_GPUS,
+                gpu_memory_utilization=CHATSPACE_GPU_MEMORY_UTILIZATION,
+                max_model_len=config.token_limit,
+                dtype=config.model_dtype,
+            )
+            model = VLLMSteerModel(
+                cfg,
+                bootstrap_layers=(),
+                enable_prefix_caching=False,  # this ensures old caches don't "bleed" over to new requests
+                enable_chunked_prefill=False,
+                max_num_batched_tokens=config.token_limit,
             )
 
         elif USE_TLENS_BRIDGE == False:
@@ -240,23 +300,12 @@ async def initialize(
             for block in model.blocks:
                 add_hook_in_to_mlp(block.mlp)
             model.setup()
-        # else:
-        #     # Load the model utilizing the new transformerlens bridge
-        #     model = boot(
-        #         model_name=(
-        #             config.override_model_id
-        #             if config.override_model_id
-        #             else config.model_id
-        #         ),
-        #         device=args.device,
-        #         dtype=STR_TO_DTYPE[config.model_dtype],
-        #     )
-
-        #     model.enable_compatibility_mode(no_processing=True)
 
         Model._instance = model
         if isinstance(model, StandardizedTransformer):
             config.set_num_layers(model.num_layers)
+        elif VLLM_AVAILABLE and isinstance(model, VLLMSteerModel):
+            config.set_num_layers(model.layer_count)
         else:
             config.set_num_layers(model.cfg.n_layers)
 
@@ -291,6 +340,48 @@ async def initialize(
 
     await asyncio.get_event_loop().run_in_executor(None, load_model_and_sae)
 
+    # After model is loaded, preload chatspace model if needed
+    if args.chatspace and VLLM_AVAILABLE:
+        model = Model.get_instance()
+        if isinstance(model, VLLMSteerModel):
+            logger.info("Preloading chatspace model with a test generation...")
+
+            async def preload_model():
+                prompts = ["Hi"]
+                sampling_params = SamplingParams(temperature=0.1, max_tokens=1)
+                result = await model.generate(prompts, sampling_params)
+                print("result:", result)
+                print("  ✓ Model preloaded successfully")
+
+            await preload_model()
+
+            # Initialize persona data for persona monitoring endpoint
+            config = Config.get_instance()
+            model_id_for_persona = config.override_model_id or config.model_id
+            logger.info(f"Initializing persona data for model: {model_id_for_persona}")
+            initialize_persona_data(model_id_for_persona)
+
+    # After model is loaded, preload chatspace model if needed
+    if args.chatspace and VLLM_AVAILABLE:
+        model = Model.get_instance()
+        if isinstance(model, VLLMSteerModel):
+            logger.info("Preloading chatspace model with a test generation...")
+
+            async def preload_model():
+                prompts = ["Hi"]
+                sampling_params = SamplingParams(temperature=0.1, max_tokens=1)
+                result = await model.generate(prompts, sampling_params)
+                print("result:", result)
+                print("  ✓ Model preloaded successfully")
+
+            await preload_model()
+
+            # Initialize persona data for persona monitoring endpoint
+            config = Config.get_instance()
+            model_id_for_persona = config.override_model_id or config.model_id
+            logger.info(f"Initializing persona data for model: {model_id_for_persona}")
+            initialize_persona_data(model_id_for_persona)
+
 
 @app.middleware("http")
 async def check_secret_key(
@@ -320,7 +411,6 @@ async def check_model(
     if request.method == "POST":
         try:
             body = await request.json()
-            print(body)
             if "model" in body and (
                 body["model"] != config.model_id
                 and body["model"] != config.override_model_id
@@ -348,12 +438,12 @@ async def log_and_check_cuda_error(
     logger.info("=== Request Info ===")
     logger.info(f"URL: {request.url}")
 
-    try:
-        body = await request.body()
-        if body:
-            logger.info(f"Body: {body.decode()}")
-    except Exception as e:
-        logger.error(f"Error reading body: {str(e)}")
+    # try:
+    #     body = await request.body()
+    #     if body:
+    #         logger.info(f"Body: {body.decode()}")
+    # except Exception as e:
+    #     logger.error(f"Error reading body: {str(e)}")
 
     return await call_next(request)
 

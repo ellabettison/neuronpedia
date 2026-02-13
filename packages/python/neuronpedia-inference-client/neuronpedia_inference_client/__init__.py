@@ -15,7 +15,7 @@
 """  # noqa: E501
 
 
-__version__ = "1.9.0"
+__version__ = "1.9.1"
 
 # import apis into sdk package
 from neuronpedia_inference_client.api.default_api import DefaultApi
@@ -65,6 +65,8 @@ from neuronpedia_inference_client.models.np_steer_method import NPSteerMethod
 from neuronpedia_inference_client.models.np_steer_type import NPSteerType
 from neuronpedia_inference_client.models.np_steer_vector import NPSteerVector
 from neuronpedia_inference_client.models.steer_completion_chat_post200_response import SteerCompletionChatPost200Response
+from neuronpedia_inference_client.models.steer_completion_chat_post200_response_assistant_axis_inner import SteerCompletionChatPost200ResponseAssistantAxisInner
+from neuronpedia_inference_client.models.steer_completion_chat_post200_response_assistant_axis_inner_turns_inner import SteerCompletionChatPost200ResponseAssistantAxisInnerTurnsInner
 from neuronpedia_inference_client.models.steer_completion_chat_post_request import SteerCompletionChatPostRequest
 from neuronpedia_inference_client.models.steer_completion_post200_response import SteerCompletionPost200Response
 from neuronpedia_inference_client.models.steer_completion_request import SteerCompletionRequest

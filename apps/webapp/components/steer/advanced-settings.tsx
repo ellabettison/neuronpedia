@@ -19,7 +19,11 @@ import * as Select from '@radix-ui/react-select';
 import { ChevronDown, HelpCircle } from 'lucide-react';
 import { NPSteerMethod } from 'neuronpedia-inference-client';
 
-export const STEER_METHODS_ALLOWED = [NPSteerMethod.SimpleAdditive, NPSteerMethod.OrthogonalDecomp];
+export const STEER_METHODS_ALLOWED = [
+  NPSteerMethod.SimpleAdditive,
+  NPSteerMethod.OrthogonalDecomp,
+  NPSteerMethod.ProjectionCap,
+];
 
 export default function SteerAdvancedSettings({
   isNnSightModel = false,
@@ -184,7 +188,7 @@ export default function SteerAdvancedSettings({
           />
         </div>
         <div className="col-span-1 flex w-full flex-row items-center justify-start gap-x-3">
-          <Select.Root value={steerMethod} onValueChange={setSteerMethod}>
+          <Select.Root value={steerMethod.toString()} onValueChange={setSteerMethod}>
             <Select.Trigger className="flex w-[162px] items-center justify-between rounded-md border border-slate-300 bg-white px-3 py-1 text-xs text-slate-700">
               <Select.Value className="flex-1 text-center" />
               <Select.Icon>
@@ -195,7 +199,7 @@ export default function SteerAdvancedSettings({
               <Select.Content className="overflow-hidden rounded-md border bg-white shadow-lg">
                 <Select.Viewport>
                   {Object.entries(NPSteerMethod)
-                    // @ts-ignore
+                    // eslint-disable-next-line @typescript-eslint/no-unused-vars
                     .filter(([_, value]) => STEER_METHODS_ALLOWED.includes(value))
                     .map(([key, value]) => (
                       <Select.Item

@@ -26,7 +26,7 @@ import {
   NeuronWithPartialRelations,
   SourceWithPartialRelations,
 } from 'prisma/generated/zod';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import BookmarkButton from './bookmark-button';
 
 export default function FeatureDashboard({
@@ -63,7 +63,18 @@ export default function FeatureDashboard({
   const pathname = usePathname();
   const [neuronLoaded, setNeuronLoaded] = useState(false);
 
+  const isAssistantAxis = useMemo(
+    () =>
+      currentNeuron?.modelId === 'llama3.3-70b-it' &&
+      currentNeuron?.layer === '40-neuronpedia-resid-post' &&
+      currentNeuron?.index === '101874252',
+    [currentNeuron],
+  );
+
   const allowTest = () => {
+    if (isAssistantAxis) {
+      return false;
+    }
     if (currentNeuron?.hasVector && currentNeuron?.model?.inferenceEnabled) {
       if (embed) {
         return embedTest;
@@ -160,6 +171,7 @@ export default function FeatureDashboard({
           <div className="fixed left-0 right-0 top-12 z-20 mb-0 flex justify-center gap-y-2 border-b bg-white px-2 pb-2 pt-1 shadow-[rgba(0,0,0,0.2)_0px_4px_3px_-3px] sm:static sm:top-16 sm:z-0 sm:mb-2 sm:flex-row sm:gap-y-0 sm:border-b-0 sm:border-t-0 sm:bg-transparent sm:px-2 sm:pb-0 sm:pt-3 sm:shadow-[0]">
             <div className="flex w-full flex-1 select-none flex-row justify-center gap-x-3 overflow-hidden px-0 pb-1 text-center font-sans text-xs font-bold leading-none text-slate-700 sm:gap-x-5 sm:px-0 sm:pt-0 sm:text-base">
               <FeatureSelector
+                filterToPublic
                 showNextPrev
                 defaultModelId={currentNeuron?.modelId || pathname.split('/')[1]}
                 defaultSourceSet={
@@ -197,7 +209,7 @@ export default function FeatureDashboard({
                     URL.revokeObjectURL(url);
                   }}
                   aria-label="Download vector as JSON"
-                  className={`h-9 w-9 overflow-hidden rounded-full bg-slate-200 px-0 py-1.5 text-center text-xs font-bold uppercase text-slate-500/80 transition-all hover:enabled:bg-sky-300 hover:enabled:text-sky-800 disabled:bg-slate-400 disabled:opacity-60`}
+                  className="h-9 w-9 overflow-hidden rounded-full bg-slate-200 px-0 py-1.5 text-center text-xs font-bold uppercase text-slate-500/80 transition-all hover:enabled:bg-sky-300 hover:enabled:text-sky-800 disabled:bg-slate-400 disabled:opacity-60"
                 >
                   <div className="-mt-0.5 flex flex-row items-center justify-center">
                     <Download className="h-5 w-5" />

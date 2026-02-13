@@ -24,8 +24,8 @@ export const MAX_GRAPH_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
 // ============ Neuronpedia Specific =============
 
 export const DEFAULT_GRAPH_MODEL_ID = 'gemma-2-2b';
-export const ADDITIONAL_MODELS_TO_LOAD = new Set(['qwen3-4b']);
-export const MODELS_WITH_NP_DASHBOARDS = new Set(['gemma-2-2b', 'qwen3-4b']);
+export const ADDITIONAL_MODELS_TO_LOAD = new Set(['qwen3-4b', 'gemma-3-4b-it']);
+export const MODELS_WITH_NP_DASHBOARDS = new Set(['gemma-2-2b', 'qwen3-4b', 'gemma-3-4b-it']);
 export const MODELS_TO_CALCULATE_REPLACEMENT_SCORES = MODELS_WITH_NP_DASHBOARDS;
 export const ANTHROPIC_MODELS = new Set(['jackl-circuits-runs-1-4-sofa-v3_0']);
 export const ANTHROPIC_MODEL_TO_NUM_LAYERS = {
@@ -236,7 +236,25 @@ function addVirtualDiff(data: CLTGraph, logitDiff: string | null) {
   const links = data.links.filter((d) => !d.isJsVirtual);
   // @ts-ignore
   // eslint-disable-next-line
-  nodes.forEach((d) => (d.logitToken = d.clerp?.split(`"`)[1]?.split(`" k(p=`)[0]));
+  // Extract logitToken from clerp - handles both formats:
+  // - Double quotes: Output " floor" (p=0.111) -> " floor"
+  // - Single quotes: output: 'Austin' (p=1.000) -> Austin
+  nodes.forEach((d) => {
+    if (!d.clerp) return;
+    // Try double quote format first
+    const doubleQuoteMatch = d.clerp.split(`"`)[1]?.split(`" k(p=`)[0];
+    if (doubleQuoteMatch) {
+      // eslint-disable-next-line no-param-reassign
+      d.logitToken = doubleQuoteMatch;
+      return;
+    }
+    // Try single quote format: output: 'token' (p=...)
+    const singleQuoteMatch = d.clerp.match(/['']([^'']+)['']/);
+    if (singleQuoteMatch) {
+      // eslint-disable-next-line
+      d.logitToken = singleQuoteMatch[1];
+    }
+  });
 
   const [logitAStr, logitBStr] = logitDiff?.split('__vs__') || [];
   if (!logitAStr || !logitBStr) return { nodes, links };

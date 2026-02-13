@@ -82,7 +82,7 @@ export const GraphHostSourceScalarFieldEnumSchema = z.enum(['id','name','hostUrl
 
 export const GraphHostSourceOnSourceSetScalarFieldEnumSchema = z.enum(['sourceSetName','sourceSetModelId','graphHostSourceId']);
 
-export const InferenceHostSourceScalarFieldEnumSchema = z.enum(['id','name','hostUrl','engine','modelId','createdAt','updatedAt']);
+export const InferenceHostSourceScalarFieldEnumSchema = z.enum(['id','name','hostUrl','engine','modelId','runpodServerlessUrl','createdAt','updatedAt']);
 
 export const InferenceHostSourceOnSourceScalarFieldEnumSchema = z.enum(['sourceId','sourceModelId','inferenceHostId']);
 
@@ -128,7 +128,7 @@ export const SavedSearchActivationScalarFieldEnumSchema = z.enum(['savedSearchId
 
 export const SteerOutputToNeuronScalarFieldEnumSchema = z.enum(['modelId','layer','index','strength','steerOutputId']);
 
-export const SteerOutputScalarFieldEnumSchema = z.enum(['id','type','modelId','steerSpecialTokens','inputText','inputTextChatTemplate','outputText','outputTextChatTemplate','temperature','numTokens','freqPenalty','seed','strengthMultiplier','steerMethod','createdAt','creatorId','version','logprobs','connectedDefaultOutputId','connectedSteerOutputIds']);
+export const SteerOutputScalarFieldEnumSchema = z.enum(['id','type','modelId','steerSpecialTokens','inputText','inputTextMd5','inputTextChatTemplate','inputTextChatTemplateMd5','outputText','outputTextChatTemplate','temperature','numTokens','freqPenalty','seed','strengthMultiplier','steerMethod','createdAt','creatorId','version','logprobs','connectedDefaultOutputId','connectedSteerOutputIds','capMonitorOutput']);
 
 export const SortOrderSchema = z.enum(['asc','desc']);
 
@@ -1244,6 +1244,7 @@ export const InferenceHostSourceSchema = z.object({
   name: z.string(),
   hostUrl: z.string(),
   modelId: z.string(),
+  runpodServerlessUrl: z.string().nullable(),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
 })
@@ -2936,7 +2937,9 @@ export const SteerOutputSchema = z.object({
   modelId: z.string(),
   steerSpecialTokens: z.boolean(),
   inputText: z.string(),
+  inputTextMd5: z.string().nullable(),
   inputTextChatTemplate: z.string().nullable(),
+  inputTextChatTemplateMd5: z.string().nullable(),
   outputText: z.string(),
   outputTextChatTemplate: z.string().nullable(),
   temperature: z.number(),
@@ -2951,6 +2954,7 @@ export const SteerOutputSchema = z.object({
   logprobs: z.string().nullable(),
   connectedDefaultOutputId: z.string().nullable(),
   connectedSteerOutputIds: z.string().array(),
+  capMonitorOutput: z.string().nullable(),
 })
 
 export type SteerOutput = z.infer<typeof SteerOutputSchema>

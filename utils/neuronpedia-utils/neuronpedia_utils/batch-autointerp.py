@@ -6,13 +6,17 @@ import json
 import logging
 import os
 import shutil
+import tempfile
 import time
 from dataclasses import asdict, dataclass
 from typing import Dict, List
 
+import boto3
 import dotenv
 import openai
 import typer
+from botocore import UNSIGNED
+from botocore.config import Config
 from cuid2 import Cuid
 from neuronpedia_utils.db_models.activation import Activation
 from neuronpedia_utils.db_models.explanation import Explanation
@@ -25,21 +29,18 @@ logging.getLogger("neuron_explainer").setLevel(logging.CRITICAL)
 
 # openai requires us to set the openai api key before the neuron_explainer imports
 dotenv.load_dotenv()
-if not os.getenv("OPENAI_API_KEY"):
-    raise ValueError(
-        "OPENAI_API_KEY is not set. Please set it in the .env file or export it as an environment variable."
-    )
+# Note: OPENAI_API_KEY check is deferred to main() when --generate-embeddings is True
 from neuron_explainer.activations.activation_records import calculate_max_activation
 
 # ruff: noqa: E402
 # flake8: noqa: E402
 from neuron_explainer.activations.activations import ActivationRecord
-from neuron_explainer.api_client import ApiClient
 from neuron_explainer.explanations.explainer import (
     AttentionHeadExplainer,
-    MaxActivationAndLogitsGeneralExplainer,
     MaxActivationAndLogitsExplainer,
+    MaxActivationAndLogitsGeneralExplainer,
     MaxActivationExplainer,
+    PythonCodeExplainer,
     TokenActivationPairExplainer,
 )
 from neuron_explainer.explanations.prompt_builder import PromptFormat
@@ -51,23 +52,49 @@ if UPLOAD_EXPLANATION_AUTHORID is None:
 DEFAULT_EMBEDDING_MODEL = "text-embedding-3-large"
 DEFAULT_EMBEDDING_DIMENSIONS = 256
 
+TIMEOUT_SECONDS = 15
+
 VALID_EXPLAINER_TYPE_NAMES = [
     "oai_token-act-pair",
     "oai_attention-head",
     "np_max-act-logits",
     "np_max-act",
     "np_acts-logits-general",
+    "python-code",
 ]
+
+VALID_API_PROVIDERS = ["openai", "openrouter", "gemini"]
+
+# Activation selection mode: top (default) or bottom
+# top: use highest activations (standard behavior)
+# bottom: use lowest/most negative activations (values are multiplied by -1)
+VALID_ACTIVATION_SELECTION_MODES = ["top", "bottom"]
+
+# Global variable set by command-line argument
+API_PROVIDER = "openrouter"
 
 # you can change this yourself if you want to experiment with other models
 VALID_EXPLAINER_MODEL_NAMES = [
     "gpt-4o-mini",
     "gpt-4.1-nano",
+    "gpt-5-nano-2025-08-07",
+    "gpt-5-mini-2025-08-07",
+    "gpt-5-nano",
     "gemini-2.0-flash",
     "gemini-2.0-flash-lite",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "openai/gpt-oss-120b",
+    "google/gemini-2.5-flash-lite",
 ]
+
+# OPENAI SUPPORT (default OpenAI API)
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+# OPENROUTER SUPPORT
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
 # GEMINI SUPPORT
 GEMINI_MODEL_NAMES = [
@@ -80,6 +107,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 # we should use this one (ai studio, simpler) but we're super rate limited
 # GEMINI_BASE_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+# GEMINI_VERTEX = False
 # so we use vertex instead. when we are not rate limited on AI studio, remove the following 4 properties
 GEMINI_PROJECT_ID = os.getenv("GEMINI_PROJECT_ID")
 GEMINI_LOCATION = os.getenv("GEMINI_LOCATION")
@@ -97,7 +125,7 @@ GEMINI_VERTEX = True
 # consider setting these on your machine for higher performance
 # ulimit -n 32768
 # sudo sysctl -w net.inet.tcp.sendspace=2097152 net.inet.tcp.recvspace=2097152
-AUTOINTERP_BATCH_SIZE = 128
+AUTOINTERP_BATCH_SIZE = 256
 
 # overridden by command line arguments
 # the number of top activations to feed the explainer per feature
@@ -128,12 +156,89 @@ HTML_ANOMALY_AND_SPECIAL_CHARS_REPLACEMENTS = {
 
 CUID_GENERATOR: Cuid = Cuid(length=25)
 
+# S3 constants for public bucket access
+S3_BUCKET_NAME = "neuronpedia-datasets"
+S3_REGION = "us-east-1"
+
 queuedToSave: List[Explanation] = []
 
 FAILED_FEATURE_INDEXES_QUEUED: List[int] | None = None
 FAILED_FEATURE_INDEXES_OUTPUT: List[str] = []
 
 IGNORE_FIRST_N_TOKENS: int = 0
+GENERATE_EMBEDDINGS: bool = True
+FRAC_NONZERO_THRESHOLD: float = 0.000001
+ACTIVATION_SELECTION_MODE: str = "top"
+
+
+def normalize_s3_path(path: str) -> str:
+    """Ensure S3 path starts with v1/ (without leading slash)."""
+    # Remove leading slash if present
+    path = path.lstrip("/")
+    # Prepend v1/ if not already present
+    if not path.startswith("v1/"):
+        path = "v1/" + path
+    return path
+
+
+def download_s3_exports(s3_path: str, local_dir: str) -> str:
+    """
+    Download exports from the public S3 bucket to a local directory.
+
+    Args:
+        s3_path: Path within the bucket (will be normalized to start with v1/)
+        local_dir: Local directory to download files to
+
+    Returns:
+        Path to the local directory containing the downloaded exports
+    """
+    s3_path = normalize_s3_path(s3_path)
+
+    print(f"Downloading from s3://{S3_BUCKET_NAME}/{s3_path} to {local_dir}")
+
+    # Create S3 client with anonymous access (public bucket)
+    s3_client = boto3.client(
+        "s3",
+        region_name=S3_REGION,
+        config=Config(signature_version=UNSIGNED),
+    )
+
+    # List all objects in the path
+    paginator = s3_client.get_paginator("list_objects_v2")
+
+    total_files = 0
+    files_to_download = []
+
+    for page in paginator.paginate(Bucket=S3_BUCKET_NAME, Prefix=s3_path):
+        if "Contents" not in page:
+            continue
+        for obj in page["Contents"]:
+            files_to_download.append(obj["Key"])
+            total_files += 1
+
+    if total_files == 0:
+        raise ValueError(f"No files found at s3://{S3_BUCKET_NAME}/{s3_path}")
+
+    print(f"Found {total_files} files to download")
+
+    # Download each file
+    for s3_key in tqdm(files_to_download, desc="Downloading from S3"):
+        # Calculate relative path from the s3_path prefix
+        relative_path = s3_key[len(s3_path) :].lstrip("/")
+        local_file_path = os.path.join(local_dir, relative_path)
+
+        # Create parent directories if needed
+        os.makedirs(os.path.dirname(local_file_path), exist_ok=True)
+
+        # Download the file
+        try:
+            s3_client.download_file(S3_BUCKET_NAME, s3_key, local_file_path)
+        except Exception as e:
+            print(f"Error downloading {s3_key}: {e}")
+            raise
+
+    print(f"Successfully downloaded {total_files} files to {local_dir}")
+    return local_dir
 
 
 def replace_html_anomalies_and_special_chars_single(text: str) -> str:
@@ -164,21 +269,31 @@ async def call_autointerp_openai_for_activations(
 
     feature_index = top_activation.index
 
-    # only needed for vertex
-    if GEMINI_VERTEX:
-        model_name = (
-            "google/" + EXPLAINER_MODEL_NAME
-            if is_gemini_model(EXPLAINER_MODEL_NAME)
-            else EXPLAINER_MODEL_NAME
-        )
-    else:
+    # Determine API configuration based on API_PROVIDER
+    if API_PROVIDER == "openai":
         model_name = EXPLAINER_MODEL_NAME
-    base_api_url = (
-        GEMINI_BASE_API_URL
-        if is_gemini_model(EXPLAINER_MODEL_NAME)
-        else ApiClient.BASE_API_URL
-    )
-    override_api_key = GEMINI_API_KEY if is_gemini_model(EXPLAINER_MODEL_NAME) else None
+        base_api_url = OPENAI_BASE_URL
+        override_api_key = OPENAI_API_KEY
+    elif API_PROVIDER == "openrouter":
+        model_name = EXPLAINER_MODEL_NAME
+        base_api_url = OPENROUTER_BASE_URL
+        override_api_key = OPENROUTER_API_KEY
+    elif API_PROVIDER == "gemini":
+        # only needed for vertex
+        if GEMINI_VERTEX:
+            model_name = (
+                "google/" + EXPLAINER_MODEL_NAME
+                if is_gemini_model(EXPLAINER_MODEL_NAME)
+                else EXPLAINER_MODEL_NAME
+            )
+        else:
+            model_name = EXPLAINER_MODEL_NAME
+        base_api_url = GEMINI_BASE_API_URL
+        override_api_key = GEMINI_API_KEY
+    else:
+        raise ValueError(
+            f"Invalid API_PROVIDER: {API_PROVIDER}. Must be 'openai', 'openrouter', or 'gemini'."
+        )
 
     global FAILED_FEATURE_INDEXES_OUTPUT
 
@@ -208,7 +323,7 @@ async def call_autointerp_openai_for_activations(
                     num_samples=1,
                     reasoning_effort=REASONING_EFFORT,
                 ),
-                timeout=20,
+                timeout=TIMEOUT_SECONDS,
             )
         elif EXPLAINER_TYPE_NAME == "oai_token-act-pair":
             for activation in activations_sorted_by_max_value:
@@ -232,7 +347,7 @@ async def call_autointerp_openai_for_activations(
                     num_samples=1,
                     reasoning_effort=REASONING_EFFORT,
                 ),
-                timeout=20,
+                timeout=TIMEOUT_SECONDS,
             )
         elif EXPLAINER_TYPE_NAME == "np_acts-logits-general":
             for activation in activations_sorted_by_max_value:
@@ -260,7 +375,45 @@ async def call_autointerp_openai_for_activations(
                         num_samples=1,
                         reasoning_effort=REASONING_EFFORT,
                     ),
-                    timeout=20,
+                    timeout=TIMEOUT_SECONDS,
+                )
+            except Exception as e:
+                print(
+                    f"Error in MaxActivationAndLogitsGeneralExplainer.generate_explanations for feature index {feature_index}:"
+                )
+                print(f"Exception type: {type(e).__name__}")
+                print(f"Exception message: {str(e)}")
+                import traceback
+
+                print(f"Traceback: {traceback.format_exc()}")
+                raise  # Re-raise to be caught by the outer try-except block
+        elif EXPLAINER_TYPE_NAME == "python-code":
+            for activation in activations_sorted_by_max_value:
+                activationRecord = ActivationRecord(
+                    tokens=replace_html_anomalies_and_special_chars(activation.tokens),
+                    activations=activation.values,
+                )
+                activationRecords.append(activationRecord)
+            explainer = PythonCodeExplainer(
+                model_name=model_name,
+                prompt_format=PromptFormat.HARMONY_V4,
+                max_concurrent=1,
+                base_api_url=base_api_url,
+                override_api_key=override_api_key,
+            )
+            try:
+                explanations = await asyncio.wait_for(
+                    explainer.generate_explanations(
+                        all_activation_records=activationRecords,
+                        max_tokens=2000,
+                        max_activation=calculate_max_activation(activationRecords),
+                        top_positive_logits=replace_html_anomalies_and_special_chars(
+                            feature.pos_str
+                        ),
+                        num_samples=1,
+                        reasoning_effort=REASONING_EFFORT,
+                    ),
+                    timeout=TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 print(
@@ -298,7 +451,7 @@ async def call_autointerp_openai_for_activations(
                         num_samples=1,
                         reasoning_effort=REASONING_EFFORT,
                     ),
-                    timeout=20,
+                    timeout=TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 print(
@@ -333,7 +486,7 @@ async def call_autointerp_openai_for_activations(
                         num_samples=1,
                         reasoning_effort=REASONING_EFFORT,
                     ),
-                    timeout=20,
+                    timeout=TIMEOUT_SECONDS,
                 )
             except Exception as e:
                 print(
@@ -366,15 +519,22 @@ async def call_autointerp_openai_for_activations(
         explanation = explanation[:-1]
     explanation = explanation.replace("\n", "").replace("\r", "")
 
+    # Append "(negative activations)" suffix for BOTTOM mode
+    if ACTIVATION_SELECTION_MODE == "bottom":
+        explanation = explanation + " (negative activations)"
+
     # print(f"Explanation: {explanation}  {feature.layer} {feature.index}")
 
     global queuedToSave
     # if the explanation is just "first token", use the top activation token
+    # Note: for BOTTOM mode, "(negative activations)" suffix is already appended above
+    # so we need to check the original explanation content
+    explanation_to_check = explanation.replace(" (negative activations)", "")
     if (
-        "unclear" in explanation.strip().lower()
-        or "unsure" in explanation.strip().lower()
-        or "first token" in explanation.strip().lower()
-        or len(explanation.strip()) == 0
+        "unclear" in explanation_to_check.strip().lower()
+        or "unsure" in explanation_to_check.strip().lower()
+        or "first token" in explanation_to_check.strip().lower()
+        or len(explanation_to_check.strip()) == 0
     ):
         # use the top activation token
         explanation = replace_html_anomalies_and_special_chars_single(
@@ -382,7 +542,10 @@ async def call_autointerp_openai_for_activations(
                 top_activation.values.index(max(top_activation.values))
             ].strip()
         )
-        if len(explanation.strip()) == 0:
+        # Append "(negative activations)" suffix for BOTTOM mode
+        if ACTIVATION_SELECTION_MODE == "bottom":
+            explanation = explanation + " (negative activations)"
+        if len(explanation.replace(" (negative activations)", "").strip()) == 0:
             # top activating token is empty, skip this feature
             FAILED_FEATURE_INDEXES_OUTPUT.append(feature_index)
             pass
@@ -395,7 +558,7 @@ async def call_autointerp_openai_for_activations(
                     index=str(feature_index),
                     description=explanation,
                     typeName=EXPLAINER_TYPE_NAME,
-                    explanationModelName=EXPLAINER_MODEL_NAME,
+                    explanationModelName=EXPLAINER_MODEL_NAME.split("/")[-1],
                     authorId=UPLOAD_EXPLANATION_AUTHORID or "",
                 )
             )
@@ -411,7 +574,7 @@ async def call_autointerp_openai_for_activations(
                 index=str(feature_index),
                 description=explanation,
                 typeName=EXPLAINER_TYPE_NAME,
-                explanationModelName=EXPLAINER_MODEL_NAME,
+                explanationModelName=EXPLAINER_MODEL_NAME.split("/")[-1],
                 authorId=UPLOAD_EXPLANATION_AUTHORID or "",
             )
         )
@@ -439,8 +602,12 @@ async def start(activations_dir: str):
 
     # don't check subdirectories (eg)
     activations_files = sorted(
-        [f for f in glob.glob(os.path.join(activations_dir, "*.gz")) if os.path.dirname(f) == activations_dir],
-        key=get_batch_number
+        [
+            f
+            for f in glob.glob(os.path.join(activations_dir, "*.gz"))
+            if os.path.dirname(f) == activations_dir
+        ],
+        key=get_batch_number,
     )
 
     print(f"got activations files: {len(activations_files)} files")
@@ -508,17 +675,37 @@ async def start(activations_dir: str):
                     desc=f"Auto-Interping activations in {os.path.basename(activations_file)}",
                     leave=False,
                 ):
-                    # Sort and take top MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE activations
-                    activations_by_index[index] = sorted(
-                        activations_by_index[index],
-                        key=lambda x: x.maxValue,
-                        reverse=True,
-                    )[:MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE]
+                    # Sort and take top/bottom MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE activations
+                    if ACTIVATION_SELECTION_MODE == "bottom":
+                        # For BOTTOM mode: sort ascending (lowest first), take lowest N
+                        activations_by_index[index] = sorted(
+                            activations_by_index[index],
+                            key=lambda x: x.maxValue,
+                            reverse=False,
+                        )[:MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE]
+                        # Multiply all values by -1 so the explainer thinks these are high activations
+                        for activation in activations_by_index[index]:
+                            activation.values = [-v for v in activation.values]
+                            activation.maxValue = -activation.maxValue
+                    else:
+                        # For TOP mode (default): sort descending (highest first), take top N
+                        activations_by_index[index] = sorted(
+                            activations_by_index[index],
+                            key=lambda x: x.maxValue,
+                            reverse=True,
+                        )[:MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE]
 
                     # enqueue it
                     # if features_by_index doesn't have "index", skip
                     if index not in features_by_index:
                         # print(f"Skipping activation {index} because it's not in features_by_index {features_by_index}")
+                        continue
+                    # skip features with frac_nonzero below threshold
+                    feature = features_by_index[index]
+                    if feature.frac_nonzero < FRAC_NONZERO_THRESHOLD:
+                        # print(
+                        #     f"Skipping feature {index} due to low frac_nonzero: {feature.frac_nonzero} < {FRAC_NONZERO_THRESHOLD}"
+                        # )
                         continue
                     task = asyncio.create_task(
                         enqueue_autointerp_openai_task_with_activations(
@@ -545,6 +732,8 @@ async def start(activations_dir: str):
 @dataclass
 class AutoInterpConfig:
     input_dir_with_source_exports: str
+    s3_exports_path: str | None
+    api_provider: str
     start_index: int
     end_index: int | None
     explainer_model_name: str
@@ -554,6 +743,9 @@ class AutoInterpConfig:
     autointerp_batch_size: int
     gzip_output: bool
     ignore_first_n_tokens: int
+    generate_embeddings: bool
+    frac_nonzero_threshold: float
+    activation_selection_mode: str
 
 
 def is_gemini_model(model_name: str) -> bool:
@@ -561,10 +753,17 @@ def is_gemini_model(model_name: str) -> bool:
 
 
 def main(
-    input_dir_with_source_exports: str = typer.Option(
-        ...,
-        help="The directory where you exported your activations and features",
-        prompt=True,
+    input_dir_with_source_exports: str | None = typer.Option(
+        None,
+        help="The directory where you exported your activations and features. Either this or --s3-exports-path must be provided.",
+    ),
+    s3_exports_path: str | None = typer.Option(
+        None,
+        help=f"S3 path in the {S3_BUCKET_NAME} bucket (e.g., 'v1/model/layer'). Will be downloaded to a local temp directory. Either this or --input-dir-with-source-exports must be provided.",
+    ),
+    api_provider: str = typer.Option(
+        "openrouter",
+        help="API provider to use: 'openai', 'openrouter', or 'gemini'",
     ),
     start_index: int = typer.Option(
         0, help="The starting index to process", prompt=True
@@ -611,6 +810,19 @@ def main(
         help="Optional number of tokens to ignore from the beginning of the text so that autointerp doesn't see it",
         prompt=True,
     ),
+    generate_embeddings: bool = typer.Option(
+        True,
+        help="Whether to generate OpenAI embeddings for explanations. If False, skips embedding generation and doesn't require OPENAI_API_KEY.",
+        prompt=True,
+    ),
+    frac_nonzero_threshold: float = typer.Option(
+        0.000001,
+        help="Minimum frac_nonzero threshold for a feature. Features below this threshold will be skipped.",
+    ),
+    activation_selection_mode: str = typer.Option(
+        "top",
+        help="Activation selection mode: 'top' (default) uses highest activations, 'bottom' uses lowest/most negative activations (values multiplied by -1).",
+    ),
 ):
     if explainer_type_name not in VALID_EXPLAINER_TYPE_NAMES:
         raise ValueError(f"Invalid explainer type name: {explainer_type_name}")
@@ -618,13 +830,94 @@ def main(
     if explainer_model_name not in VALID_EXPLAINER_MODEL_NAMES:
         raise ValueError(f"Invalid explainer model name: {explainer_model_name}")
 
-    if is_gemini_model(explainer_model_name) and GEMINI_API_KEY is None:
+    if activation_selection_mode not in VALID_ACTIVATION_SELECTION_MODES:
         raise ValueError(
-            "GEMINI_API_KEY is not set even though you're using a Gemini model"
+            f"Invalid activation selection mode: {activation_selection_mode}. Must be one of: {VALID_ACTIVATION_SELECTION_MODES}"
         )
 
-    global FAILED_FEATURE_INDEXES_QUEUED, INPUT_DIR_WITH_SOURCE_EXPORTS, START_INDEX, END_INDEX, EXPLAINER_MODEL_NAME, EXPLAINER_TYPE_NAME, MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE, AUTOINTERP_BATCH_SIZE, EXPLANATIONS_OUTPUT_DIR, GZIP_OUTPUT, IGNORE_FIRST_N_TOKENS, REASONING_EFFORT
-    INPUT_DIR_WITH_SOURCE_EXPORTS = input_dir_with_source_exports
+    if api_provider not in VALID_API_PROVIDERS:
+        raise ValueError(
+            f"Invalid API provider: {api_provider}. Must be one of: {VALID_API_PROVIDERS}"
+        )
+
+    # Set global API_PROVIDER from argument
+    global API_PROVIDER
+    API_PROVIDER = api_provider
+
+    # Check API key based on which provider is being used
+    if API_PROVIDER == "openai":
+        if OPENAI_API_KEY is None:
+            raise ValueError(
+                "OPENAI_API_KEY is not set even though API_PROVIDER is 'openai'"
+            )
+    elif API_PROVIDER == "openrouter":
+        if OPENROUTER_API_KEY is None:
+            raise ValueError(
+                "OPENROUTER_API_KEY is not set even though API_PROVIDER is 'openrouter'"
+            )
+    elif API_PROVIDER == "gemini":
+        if is_gemini_model(explainer_model_name) and GEMINI_API_KEY is None:
+            raise ValueError(
+                "GEMINI_API_KEY is not set even though you're using a Gemini model"
+            )
+    else:
+        raise ValueError(
+            f"Invalid API_PROVIDER: {API_PROVIDER}. Must be 'openai', 'openrouter', or 'gemini'."
+        )
+
+    global \
+        FAILED_FEATURE_INDEXES_QUEUED, \
+        INPUT_DIR_WITH_SOURCE_EXPORTS, \
+        START_INDEX, \
+        END_INDEX, \
+        EXPLAINER_MODEL_NAME, \
+        EXPLAINER_TYPE_NAME, \
+        MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE, \
+        AUTOINTERP_BATCH_SIZE, \
+        EXPLANATIONS_OUTPUT_DIR, \
+        GZIP_OUTPUT, \
+        IGNORE_FIRST_N_TOKENS, \
+        REASONING_EFFORT, \
+        GENERATE_EMBEDDINGS, \
+        FRAC_NONZERO_THRESHOLD, \
+        ACTIVATION_SELECTION_MODE
+
+    GENERATE_EMBEDDINGS = generate_embeddings
+    if GENERATE_EMBEDDINGS and not os.getenv("OPENAI_API_KEY"):
+        raise ValueError(
+            "OPENAI_API_KEY is not set. Please set it in the .env file or export it as an environment variable. "
+            "Or set --generate-embeddings=False to skip embedding generation."
+        )
+
+    # Validate that either input_dir_with_source_exports or s3_exports_path is provided
+    if input_dir_with_source_exports is None and s3_exports_path is None:
+        raise ValueError(
+            "Either --input-dir-with-source-exports or --s3-exports-path must be provided."
+        )
+    if input_dir_with_source_exports is not None and s3_exports_path is not None:
+        raise ValueError(
+            "Only one of --input-dir-with-source-exports or --s3-exports-path should be provided, not both."
+        )
+    if s3_exports_path is not None and output_dir is None:
+        raise ValueError(
+            "--output-dir is required when using --s3-exports-path, otherwise outputs would be written to a temp directory that gets deleted."
+        )
+
+    # If s3_exports_path is provided, download to a temp directory
+    temp_dir = None
+    if s3_exports_path is not None:
+        temp_dir = tempfile.mkdtemp(prefix="neuronpedia_autointerp_")
+        print(f"Created temporary directory: {temp_dir}")
+        try:
+            download_s3_exports(s3_exports_path, temp_dir)
+            INPUT_DIR_WITH_SOURCE_EXPORTS = temp_dir
+        except Exception as e:
+            # Clean up temp dir on failure
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise ValueError(f"Failed to download from S3: {e}")
+    else:
+        INPUT_DIR_WITH_SOURCE_EXPORTS = input_dir_with_source_exports
+
     if not os.path.exists(INPUT_DIR_WITH_SOURCE_EXPORTS):
         raise ValueError(
             f"Input directory does not exist: {INPUT_DIR_WITH_SOURCE_EXPORTS}"
@@ -650,6 +943,8 @@ def main(
     )
     AUTOINTERP_BATCH_SIZE = autointerp_batch_size
     IGNORE_FIRST_N_TOKENS = ignore_first_n_tokens
+    FRAC_NONZERO_THRESHOLD = frac_nonzero_threshold
+    ACTIVATION_SELECTION_MODE = activation_selection_mode
     EXPLANATIONS_OUTPUT_DIR = output_dir
     if not EXPLANATIONS_OUTPUT_DIR:
         EXPLANATIONS_OUTPUT_DIR = os.path.join(
@@ -663,6 +958,8 @@ def main(
 
     config = AutoInterpConfig(
         input_dir_with_source_exports=INPUT_DIR_WITH_SOURCE_EXPORTS,
+        s3_exports_path=s3_exports_path,
+        api_provider=API_PROVIDER,
         start_index=START_INDEX,
         end_index=END_INDEX,
         explainer_model_name=EXPLAINER_MODEL_NAME,
@@ -672,6 +969,9 @@ def main(
         autointerp_batch_size=AUTOINTERP_BATCH_SIZE,
         gzip_output=gzip_output,
         ignore_first_n_tokens=IGNORE_FIRST_N_TOKENS,
+        generate_embeddings=GENERATE_EMBEDDINGS,
+        frac_nonzero_threshold=FRAC_NONZERO_THRESHOLD,
+        activation_selection_mode=ACTIVATION_SELECTION_MODE,
     )
 
     print("Auto-Interp Config\n", json.dumps(asdict(config), indent=2))
@@ -715,6 +1015,11 @@ def main(
     total_time_minutes = total_time_seconds / 60
     print(f"--- {total_time_minutes:.2f} minutes total ---")
 
+    # Clean up temp directory if we created one from S3 download
+    if temp_dir is not None and os.path.exists(temp_dir):
+        print(f"Cleaning up temporary directory: {temp_dir}")
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
 
 def get_next_batch_number() -> int:
     existing_batch_numbers = [
@@ -735,26 +1040,28 @@ def generate_embeddings_and_flush_explanations_to_file(explanations: List[Explan
     # remove all explanations with empty descriptions
     explanations = [exp for exp in explanations if exp.description.strip() != ""]
 
-    descriptions = [exp.description for exp in explanations]
-    try:
-        embeddings = openai.embeddings.create(
-            model=DEFAULT_EMBEDDING_MODEL,
-            input=descriptions,
-            dimensions=DEFAULT_EMBEDDING_DIMENSIONS,
-        )
-    except Exception as e:
-        print(f"Error generating embeddings: {str(e)}")
-        print(f"Descriptions: {json.dumps(descriptions)}")
-        print(f"Length of descriptions: {len(descriptions)}")
-        # add all the description indexes to the failed_feature_indexes
-        global FAILED_FEATURE_INDEXES_OUTPUT
-        FAILED_FEATURE_INDEXES_OUTPUT.extend([exp.index for exp in explanations])
-        return
-    if len(embeddings.data) != len(explanations):
-        raise Exception("Number of embeddings doesn't match number of explanations")
-    for exp, emb in zip(explanations, embeddings.data):
-        exp.embedding = [round(value, 9) for value in emb.embedding]
-    # print(f"Generated {len(embeddings.data)} embeddings")
+    global FAILED_FEATURE_INDEXES_OUTPUT
+
+    if GENERATE_EMBEDDINGS:
+        descriptions = [exp.description for exp in explanations]
+        try:
+            embeddings = openai.embeddings.create(
+                model=DEFAULT_EMBEDDING_MODEL,
+                input=descriptions,
+                dimensions=DEFAULT_EMBEDDING_DIMENSIONS,
+            )
+        except Exception as e:
+            print(f"Error generating embeddings: {str(e)}")
+            print(f"Descriptions: {json.dumps(descriptions)}")
+            print(f"Length of descriptions: {len(descriptions)}")
+            # add all the description indexes to the failed_feature_indexes
+            FAILED_FEATURE_INDEXES_OUTPUT.extend([exp.index for exp in explanations])
+            return
+        if len(embeddings.data) != len(explanations):
+            raise Exception("Number of embeddings doesn't match number of explanations")
+        for exp, emb in zip(explanations, embeddings.data):
+            exp.embedding = [round(value, 9) for value in emb.embedding]
+        # print(f"Generated {len(embeddings.data)} embeddings")
 
     batch_number = get_next_batch_number()
     filename = f"batch-{batch_number}.jsonl"
@@ -766,6 +1073,9 @@ def generate_embeddings_and_flush_explanations_to_file(explanations: List[Explan
             for key, value in explanation_dict.items():
                 if isinstance(value, datetime.datetime):
                     explanation_dict[key] = value.isoformat()
+            # Remove embedding field if embeddings were not generated
+            if not GENERATE_EMBEDDINGS and "embedding" in explanation_dict:
+                del explanation_dict["embedding"]
             json.dump(explanation_dict, f)
             f.write("\n")
 

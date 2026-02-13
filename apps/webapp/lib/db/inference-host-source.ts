@@ -1,6 +1,7 @@
 import { prisma } from '@/lib/db';
 import { InferenceEngine, InferenceHostSource, InferenceHostSourceOnSource } from '@prisma/client';
 import { IS_DOCKER_COMPOSE, USE_LOCALHOST_INFERENCE } from '../env';
+import { getSourceSetNameFromSource } from '../utils/source';
 import { AuthenticatedUser } from '../with-user';
 import { getSourceInferenceHosts } from './source';
 import { userCanAccessModelAndSourceSet } from './userCanAccess';
@@ -189,4 +190,50 @@ export const getTwoRandomServerHostsForSourceSet = async (
   }
 
   return [hosts[randomIndex], hosts[randomIndex2]];
+};
+
+/**
+ * Get the RunPod serverless URL for a model's inference host with the specified engine.
+ * Returns null if no RunPod serverless URL is configured.
+ */
+export const getRunpodServerlessUrlForModel = async (
+  modelId: string,
+  engine: InferenceEngine,
+): Promise<string | null> => {
+  const host = await prisma.inferenceHostSource.findFirst({
+    where: {
+      modelId,
+      engine,
+      runpodServerlessUrl: {
+        not: null,
+      },
+    },
+  });
+
+  return host?.runpodServerlessUrl || null;
+};
+
+/**
+ * Get the RunPod serverless URL for a source's inference host with the specified engine.
+ * Returns null if no RunPod serverless URL is configured.
+ */
+export const getRunpodServerlessUrlForSource = async (
+  modelId: string,
+  sourceId: string,
+  user: AuthenticatedUser | null = null,
+  engine: InferenceEngine = InferenceEngine.TRANSFORMER_LENS,
+): Promise<string | null> => {
+  const canAccess = await userCanAccessModelAndSourceSet(modelId, getSourceSetNameFromSource(sourceId), user, true);
+  if (!canAccess) {
+    return null;
+  }
+
+  const hosts = await getSourceInferenceHosts(modelId, sourceId, user, engine);
+  if (!hosts || hosts.length === 0) {
+    return null;
+  }
+
+  // Find the first host that has a runpodServerlessUrl
+  const hostWithRunpod = hosts.find((h) => h.inferenceHost.runpodServerlessUrl);
+  return hostWithRunpod?.inferenceHost.runpodServerlessUrl || null;
 };

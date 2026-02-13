@@ -39,6 +39,8 @@ src/models/NPSteerMethod.ts
 src/models/NPSteerType.ts
 src/models/NPSteerVector.ts
 src/models/SteerCompletionChatPost200Response.ts
+src/models/SteerCompletionChatPost200ResponseAssistantAxisInner.ts
+src/models/SteerCompletionChatPost200ResponseAssistantAxisInnerTurnsInner.ts
 src/models/SteerCompletionChatPostRequest.ts
 src/models/SteerCompletionPost200Response.ts
 src/models/SteerCompletionRequest.ts

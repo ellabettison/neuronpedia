@@ -35,13 +35,13 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import SteerAdvancedSettings from './advanced-settings';
 import SteerCompletion from './completion';
-import SteerCompletionChat from './completion-chat';
+import SteerCompletionChat, { NNSIGHT_MODELS } from './completion-chat';
 import SteerPresetSelector from './preset-selector';
 import SteerSelectedFeature from './selected-feature';
 import SteerTooltip from './tooltip';
 
-const MODELS_TO_FILTER_OUT = ['gpt-oss-20b'];
-const NNSIGHT_MODELS = ['llama3.3-70b-it', 'gpt-oss-20b'];
+const MODELS_TO_FILTER_OUT: string[] = []; // ['gpt-oss-20b']
+const MODELS_TO_FILTER_OUT_PREFIX = ['gemma-3-'];
 
 export default function Steerer({
   initialModelId,
@@ -50,6 +50,7 @@ export default function Steerer({
   initialStrength,
   initialSavedId,
   hideInitialSettingsOnMobile = false,
+  initialPreset,
 }: {
   initialModelId: string;
   initialSource?: string;
@@ -57,6 +58,7 @@ export default function Steerer({
   initialStrength?: string;
   initialSavedId?: string;
   hideInitialSettingsOnMobile?: boolean;
+  initialPreset?: string;
 }) {
   const {
     globalModels,
@@ -160,6 +162,15 @@ export default function Steerer({
       .then((data: SteerPreset) => {
         setModel(data.model);
         setFeaturePresets(data.featurePresets);
+        if (initialPreset) {
+          const preset = data.featurePresets.find((p) => p.alias === initialPreset);
+          if (preset) {
+            setSelectedFeatures(preset.features);
+            if (preset.steerMethod) {
+              setSteerMethod(preset.steerMethod);
+            }
+          }
+        }
       })
       .catch((error) => {
         console.error(`error loading presets: ${error}`);
@@ -465,7 +476,11 @@ export default function Steerer({
                 modelIdChangedCallback={(newModelId) => {
                   setModelId(newModelId);
                 }}
-                overrideModels={getInferenceEnabledModels().filter((m) => !MODELS_TO_FILTER_OUT.includes(m))}
+                overrideModels={getInferenceEnabledModels().filter(
+                  (m) =>
+                    !MODELS_TO_FILTER_OUT.includes(m) &&
+                    !MODELS_TO_FILTER_OUT_PREFIX.some((prefix) => m.startsWith(prefix)),
+                )}
               />
             </div>
           </>
@@ -604,6 +619,7 @@ export default function Steerer({
               presetIsSelected={presetIsSelected}
               selectedFeatures={selectedFeatures}
               setSelectedFeatures={setSelectedFeatures}
+              setSteerMethod={setSteerMethod}
               setShowSettingsOnMobile={setShowSettingsOnMobile}
               // eslint-disable-next-line react/jsx-no-bind
               deleteUserVector={deleteUserVector}
@@ -612,26 +628,6 @@ export default function Steerer({
             />
 
             <div className="mb-0.5 mt-5 text-left text-[10px] font-medium uppercase text-slate-500">What to Steer</div>
-            <div className="flex w-full flex-col divide-y divide-slate-200 overflow-y-scroll py-0.5">
-              {selectedFeatures.length === 0 && (
-                <div className="flex w-full flex-row items-center justify-center py-2 pt-2 text-center text-sm font-medium leading-snug text-slate-600">
-                  <div className="text-slate-300">No Features Selected</div>
-                </div>
-              )}
-              {selectedFeatures.map((feature) => (
-                <SteerSelectedFeature
-                  key={feature.modelId + feature.layer + feature.index}
-                  feature={feature}
-                  // eslint-disable-next-line react/jsx-no-bind
-                  setFeatureStrength={setFeatureStrength}
-                  selectedFeatures={selectedFeatures}
-                  // eslint-disable-next-line react/jsx-no-bind
-                  setSelectedFeatures={setSelectedFeatures}
-                  // eslint-disable-next-line react/jsx-no-bind
-                  findExplanationFromPresets={findExplanationFromPresets}
-                />
-              ))}
-            </div>
             <div className="mt-2 flex w-full flex-row items-center justify-center gap-x-2">
               <Button
                 onClick={() => setShowSearch(true)}
@@ -664,6 +660,26 @@ export default function Steerer({
               >
                 + Add Vector
               </Button>
+            </div>
+            <div className="mt-1 flex max-h-[280px] min-h-0 w-full flex-col divide-y divide-slate-200 overflow-y-scroll py-0.5">
+              {selectedFeatures.length === 0 && (
+                <div className="flex w-full flex-row items-center justify-center py-2 pt-2 text-center text-sm font-medium leading-snug text-slate-600">
+                  <div className="text-slate-300">No Features Selected</div>
+                </div>
+              )}
+              {selectedFeatures.map((feature) => (
+                <SteerSelectedFeature
+                  key={feature.modelId + feature.layer + feature.index}
+                  feature={feature}
+                  // eslint-disable-next-line react/jsx-no-bind
+                  setFeatureStrength={setFeatureStrength}
+                  selectedFeatures={selectedFeatures}
+                  // eslint-disable-next-line react/jsx-no-bind
+                  setSelectedFeatures={setSelectedFeatures}
+                  // eslint-disable-next-line react/jsx-no-bind
+                  findExplanationFromPresets={findExplanationFromPresets}
+                />
+              ))}
             </div>
           </div>
         )}

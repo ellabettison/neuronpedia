@@ -2,12 +2,15 @@ import { prisma } from '@/lib/db';
 import { NEXT_PUBLIC_URL } from '@/lib/env';
 import { RequestOptionalUser, withOptionalUser } from '@/lib/with-user';
 import { SteerOutputType } from '@prisma/client';
-import { NPSteerMethod } from 'neuronpedia-inference-client';
+import {
+  NPSteerMethod,
+  SteerCompletionChatPost200ResponseAssistantAxisInnerFromJSON,
+} from 'neuronpedia-inference-client';
 import { NextResponse } from 'next/server';
 import { object, string, ValidationError } from 'yup';
 import { SteerResultChat } from '../steer-chat/route';
 
-export const maxDuration = 30;
+export const maxDuration = 60;
 
 const inputSchema = object({
   steerOutputId: string().required(),
@@ -100,6 +103,31 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
 
     toReturnResult.id = savedSteerSteeredOutput.id;
     toReturnResult.shareUrl = `${NEXT_PUBLIC_URL}/steer/${savedSteerSteeredOutput.id}`;
+
+    // Handle assistant_axis (capMonitorOutput) for PROJECTION_CAP steer method
+    const isAssistantAxis = savedSteerSteeredOutput.steerMethod === NPSteerMethod.ProjectionCap;
+    if (isAssistantAxis) {
+      toReturnResult.assistant_axis = [];
+
+      // Get capMonitorOutput for steered output (use cached data only)
+      // Use FromJSON to transform snake_case (stored in DB) to camelCase (TypeScript client types)
+      const steeredCapMonitor = savedSteerSteeredOutput.capMonitorOutput;
+      if (steeredCapMonitor) {
+        const parsed = JSON.parse(steeredCapMonitor);
+        toReturnResult.assistant_axis.push(SteerCompletionChatPost200ResponseAssistantAxisInnerFromJSON(parsed));
+      }
+
+      // Get capMonitorOutput for default output (use cached data only)
+      const defaultCapMonitor = savedSteerDefaultOutput.capMonitorOutput;
+      if (defaultCapMonitor) {
+        const parsed = JSON.parse(defaultCapMonitor);
+        toReturnResult.assistant_axis.push(SteerCompletionChatPost200ResponseAssistantAxisInnerFromJSON(parsed));
+      }
+
+      if (toReturnResult.assistant_axis.length === 0) {
+        toReturnResult.assistant_axis = undefined;
+      }
+    }
 
     return NextResponse.json(toReturnResult);
   } catch (error) {

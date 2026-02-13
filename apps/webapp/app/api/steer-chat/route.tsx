@@ -11,12 +11,15 @@ import { DEMO_MODE, NEXT_PUBLIC_URL } from '@/lib/env';
 import { steerCompletionChat } from '@/lib/utils/inference';
 import {
   ChatMessage,
+  ERROR_STEER_MAX_PROMPT_CHARS,
   STEER_MAX_PROMPT_CHARS,
+  STEER_MAX_PROMPT_CHARS_ASSISTANT_AXIS,
+  STEER_MAX_PROMPT_CHARS_THINKING,
   STEER_METHOD,
   STEER_N_COMPLETION_TOKENS_MAX,
+  STEER_N_COMPLETION_TOKENS_MAX_ASSISTANT_AXIS,
   STEER_N_COMPLETION_TOKENS_MAX_LARGE_LLM,
   STEER_N_COMPLETION_TOKENS_MAX_THINKING,
-  STEER_STRENGTH_MAX,
   STEER_STRENGTH_MIN,
   STEER_STRENGTH_MULTIPLIER_MAX,
   STEER_TEMPERATURE_MAX,
@@ -25,6 +28,7 @@ import {
 import { AuthenticatedUser, RequestOptionalUser, withOptionalUser } from '@/lib/with-user';
 import { SteerOutputToNeuronWithPartialRelations } from '@/prisma/generated/zod';
 import { SteerOutputType } from '@prisma/client';
+import { createHash } from 'crypto';
 import { EventSourceMessage } from 'eventsource-parser';
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import {
@@ -32,12 +36,16 @@ import {
   NPSteerChatMessage,
   NPSteerMethod,
   SteerCompletionChatPost200Response,
+  SteerCompletionChatPost200ResponseAssistantAxisInner,
+  SteerCompletionChatPost200ResponseAssistantAxisInnerFromJSON,
+  SteerCompletionChatPost200ResponseAssistantAxisInnerToJSON,
+  SteerCompletionChatPost200ResponseFromJSON,
 } from 'neuronpedia-inference-client';
 import { NextResponse } from 'next/server';
 import { array, bool, InferType, number, object, string, ValidationError } from 'yup';
 
 // Hobby plans don't support > 60 seconds
-// export const maxDuration = 180;
+export const maxDuration = 180;
 
 const NNSIGHT_MODELS = ['llama3.3-70b-it', 'gpt-oss-20b'];
 const STEERING_VERSION = 1;
@@ -60,8 +68,17 @@ async function saveSteerChatOutput(
   steerTypesRan: SteerOutputType[],
   input: { raw: string; chatTemplate: NPSteerChatMessage[] } | null,
   userId: string | undefined,
+  assistantAxisArray?: SteerCompletionChatPost200ResponseAssistantAxisInner[],
 ) {
   let defaultOutputId = existingDefaultOutputId;
+
+  // Helper to find capMonitorOutput for a given steer type from the assistant_axis array
+  // We use ToJSON to save in snake_case format so FromJSON can correctly load it later
+  const getCapMonitorOutput = (steerType: SteerOutputType): string | null => {
+    if (!assistantAxisArray || !Array.isArray(assistantAxisArray)) return null;
+    const axisItem = assistantAxisArray.find((item) => item.type === steerType);
+    return axisItem ? JSON.stringify(SteerCompletionChatPost200ResponseAssistantAxisInnerToJSON(axisItem)) : null;
+  };
 
   for (const steerTypeRan of steerTypesRan) {
     if (steerTypeRan === SteerOutputType.DEFAULT) {
@@ -81,7 +98,13 @@ async function saveSteerChatOutput(
           // rest is the same
           creatorId: userId,
           inputText: input?.raw || '',
-          inputTextChatTemplate: JSON.stringify(sortChatMessages(input?.chatTemplate || [])),
+          inputTextMd5: createHash('md5')
+            .update(input?.raw || '')
+            .digest('hex'),
+          inputTextChatTemplate: JSON.stringify(sortChatMessages(body.defaultChatMessages)),
+          inputTextChatTemplateMd5: createHash('md5')
+            .update(JSON.stringify(sortChatMessages(body.defaultChatMessages)))
+            .digest('hex'),
           temperature: body.temperature,
           numTokens: body.n_tokens,
           freqPenalty: body.freq_penalty,
@@ -92,6 +115,7 @@ async function saveSteerChatOutput(
           steerMethod: body.steer_method,
           toNeurons: {},
           logprobs: output.logprobs ? JSON.stringify(output.logprobs) : null,
+          capMonitorOutput: getCapMonitorOutput(SteerOutputType.DEFAULT),
         },
       });
       // update the default saved output id since we just saved it
@@ -114,7 +138,13 @@ async function saveSteerChatOutput(
           // rest is the same
           creatorId: userId,
           inputText: input?.raw || '',
-          inputTextChatTemplate: JSON.stringify(sortChatMessages(input?.chatTemplate || [])),
+          inputTextMd5: createHash('md5')
+            .update(input?.raw || '')
+            .digest('hex'),
+          inputTextChatTemplate: JSON.stringify(sortChatMessages(body.steeredChatMessages)),
+          inputTextChatTemplateMd5: createHash('md5')
+            .update(JSON.stringify(sortChatMessages(body.steeredChatMessages)))
+            .digest('hex'),
           temperature: body.temperature,
           numTokens: body.n_tokens,
           freqPenalty: body.freq_penalty,
@@ -138,6 +168,7 @@ async function saveSteerChatOutput(
             })),
           },
           logprobs: output.logprobs ? JSON.stringify(output.logprobs) : null,
+          capMonitorOutput: getCapMonitorOutput(SteerOutputType.STEERED),
         },
       });
 
@@ -188,30 +219,11 @@ async function* transformStream(
     if (done) {
       break;
     }
-    const parsed = JSON.parse(value.data);
 
     try {
-      const toYield: SteerCompletionChatPost200Response = {
-        outputs: parsed.outputs.map((output: any) => {
-          const op = {
-            raw: output.raw,
-            chatTemplate: output.chat_template?.map((message: any) => ({
-              role: message.role,
-              content: message.content,
-            })),
-            type: output.type,
-            logprobs: output.logprobs ? output.logprobs : null,
-          };
-          return op;
-        }),
-        input: {
-          raw: parsed.input.raw,
-          chatTemplate: parsed.input.chat_template?.map((message: any) => ({
-            role: message.role,
-            content: message.content,
-          })),
-        },
-      };
+      const parsed = JSON.parse(value.data);
+      // Use the TypeScript client's FromJSON function to transform snake_case to camelCase
+      const toYield = SteerCompletionChatPost200ResponseFromJSON(parsed);
       yield toYield;
     } catch (error) {
       console.error(error);
@@ -228,6 +240,7 @@ async function* generateResponse(
   user: AuthenticatedUser | null,
   hasVector: boolean,
 ): AsyncGenerator<SteerResultChat> {
+  console.log('steerTypesToRun', steerTypesToRun);
   const steerCompletionChatResults = (await steerCompletionChat(
     body.modelId,
     steerTypesToRun,
@@ -244,6 +257,8 @@ async function* generateResponse(
     user,
     true,
     body.steer_method,
+    undefined,
+    body.isAssistantAxis,
   )) as ReadableStream<any>[];
 
   const readableStreams = steerCompletionChatResults.map((stream) =>
@@ -251,48 +266,91 @@ async function* generateResponse(
   );
   const streamReaders = readableStreams.map((stream) => stream.getReader());
 
+  // Check if this is a combined request (one stream with both types)
+  const isCombinedRequest = steerCompletionChatResults.length === 1 && steerTypesToRun.length === 2;
+
   const streamProcessors = streamReaders.map((streamReader, index) => ({
-    steerType: steerTypesToRun[index],
+    // For combined requests, the single stream handles both types
+    steerTypes: isCombinedRequest ? steerTypesToRun : [steerTypesToRun[index]],
     done: false,
     generator: transformStream(streamReader),
+    pendingPromise: null as Promise<{ processorIndex: number; value: any; done: boolean }> | null,
   }));
 
   let input: { raw: string; chatTemplate: NPSteerChatMessage[] } | null = null;
 
-  // Continue until all streams are done
+  // Helper to create a promise for reading from a processor
+  const createReadPromise = (processor: (typeof streamProcessors)[0], processorIndex: number) =>
+    processor.generator.next().then(({ value, done }) => ({
+      processorIndex,
+      value,
+      done: done || false,
+    }));
+
+  // Initialize pending promises for all processors
+  streamProcessors.forEach((processor, index) => {
+    processor.pendingPromise = createReadPromise(processor, index);
+  });
+
+  // Continue until all streams are done - process in parallel using Promise.race
   while (streamProcessors.some((processor) => !processor.done)) {
-    let hasNewContent = false;
+    // Get all pending promises from non-done processors
+    const activePromises = streamProcessors
+      .map((processor, index) => ({ processor, index }))
+      .filter(({ processor }) => !processor.done && processor.pendingPromise)
+      .map(({ processor }) => processor.pendingPromise!);
 
-    // Process each stream independently
-    for (const processor of streamProcessors) {
-      // eslint-disable-next-line no-continue
-      if (processor.done) continue;
+    if (activePromises.length === 0) break;
 
-      const { value, done } = await processor.generator.next();
+    // Wait for whichever stream has data first
+    const result = await Promise.race(activePromises);
+    const processor = streamProcessors[result.processorIndex];
 
-      if (done) {
-        processor.done = true;
-        // eslint-disable-next-line no-continue
-        continue;
+    if (result.done) {
+      processor.done = true;
+      processor.pendingPromise = null;
+    } else {
+      // Process the result from this processor
+      const { value } = result;
+
+      // Process all outputs for this processor's steer types
+      for (const steerType of processor.steerTypes) {
+        const output = value.outputs.find((out: any) => out.type === steerType);
+        if (!output) {
+          throw new Error(`No output found for steerType: ${steerType}`);
+        }
+
+        input = value.input;
+        toReturnResult[steerType] = {
+          raw: output.raw,
+          chatTemplate: output.chatTemplate,
+          logprobs: output.logprobs ? output.logprobs : null,
+        };
+      }
+      // Pass through assistant_axis data from inference server
+      // Merge assistant_axis arrays when we have separate streams for each type
+      if (value.assistantAxis) {
+        if (!toReturnResult.assistant_axis) {
+          toReturnResult.assistant_axis = value.assistantAxis;
+        } else if (Array.isArray(toReturnResult.assistant_axis) && Array.isArray(value.assistantAxis)) {
+          // Merge arrays, replacing items with matching type
+          for (const newItem of value.assistantAxis) {
+            const existingIndex = toReturnResult.assistant_axis.findIndex((item: any) => item.type === newItem.type);
+            if (existingIndex >= 0) {
+              toReturnResult.assistant_axis[existingIndex] = newItem;
+            } else {
+              toReturnResult.assistant_axis.push(newItem);
+            }
+          }
+        } else {
+          toReturnResult.assistant_axis = value.assistantAxis;
+        }
       }
 
-      // Process the chunk
-      const output = value.outputs.find((out: any) => out.type === processor.steerType);
-      if (!output) {
-        throw new Error(`No output found for steerType: ${processor.steerType}`);
-      }
+      // Start reading the next chunk from this processor immediately
+      processor.pendingPromise = createReadPromise(processor, result.processorIndex);
 
-      input = value.input;
-      toReturnResult[processor.steerType] = {
-        raw: output.raw,
-        chatTemplate: output.chatTemplate,
-        logprobs: output.logprobs ? output.logprobs : null,
-      };
-      hasNewContent = true;
-    }
-
-    // Only yield if we have new content
-    if (hasNewContent) {
+      // Yield the updated result
       yield toReturnResult;
     }
   }
@@ -309,6 +367,7 @@ async function* generateResponse(
         steerTypesToRun,
         input,
         user?.id,
+        toReturnResult.assistant_axis,
       );
     }
     yield toReturnResult;
@@ -342,6 +401,7 @@ export type SteerResultChat = {
       }
     | undefined;
   features?: SteerOutputToNeuronWithPartialRelations[];
+  assistant_axis?: SteerCompletionChatPost200ResponseAssistantAxisInner[];
 };
 
 export type FeatureWithMaxActApprox = {
@@ -357,7 +417,7 @@ const steerSchema = object({
     .of(
       object({
         content: string().required(),
-        role: string().oneOf(['user', 'assistant', 'system', 'model']).required(),
+        role: string().oneOf(['user', 'assistant', 'system', 'model', 'developer']).required(),
       }),
     )
     .required(),
@@ -365,7 +425,7 @@ const steerSchema = object({
     .of(
       object({
         content: string().required(),
-        role: string().oneOf(['user', 'assistant', 'system', 'model']).required(),
+        role: string().oneOf(['user', 'assistant', 'system', 'model', 'developer']).required(),
       }),
     )
     .required(),
@@ -379,7 +439,6 @@ const steerSchema = object({
         strength: number()
           .required()
           .min(STEER_STRENGTH_MIN)
-          .max(STEER_STRENGTH_MAX * 3)
           .transform((value) => value),
       }).required(),
     )
@@ -392,6 +451,7 @@ const steerSchema = object({
   steer_special_tokens: bool().required(),
   stream: bool().default(false),
   steer_method: string().oneOf(Object.values(NPSteerMethod)).default(STEER_METHOD),
+  isAssistantAxis: bool().default(false),
 });
 
 export type SteerSchemaTypeChat = InferType<typeof steerSchema>;
@@ -598,8 +658,15 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
     const totalSteeredChars = body.steeredChatMessages.reduce((sum, message) => sum + message.content.length, 0);
 
     // Check if total length exceeds the maximum allowed
-    if (totalDefaultChars > STEER_MAX_PROMPT_CHARS || totalSteeredChars > STEER_MAX_PROMPT_CHARS) {
-      return NextResponse.json({ message: 'Total chat message length exceeds the maximum allowed' }, { status: 400 });
+    let maxPromptChars = STEER_MAX_PROMPT_CHARS;
+    if (body.isAssistantAxis) {
+      maxPromptChars = STEER_MAX_PROMPT_CHARS_ASSISTANT_AXIS;
+    } else if (NNSIGHT_MODELS.includes(modelId)) {
+      maxPromptChars = STEER_MAX_PROMPT_CHARS_THINKING;
+    }
+    if (totalDefaultChars > maxPromptChars || totalSteeredChars > maxPromptChars) {
+      console.log('total length exceeds the maximum allowed', totalDefaultChars, totalSteeredChars, maxPromptChars);
+      return NextResponse.json({ message: ERROR_STEER_MAX_PROMPT_CHARS }, { status: 400 });
     }
 
     // check access
@@ -613,6 +680,13 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       if (body.n_tokens > STEER_N_COMPLETION_TOKENS_MAX_THINKING) {
         return NextResponse.json(
           { message: `For thinking models the max n_tokens is ${STEER_N_COMPLETION_TOKENS_MAX_THINKING}` },
+          { status: 400 },
+        );
+      }
+    } else if (body.isAssistantAxis) {
+      if (body.n_tokens > STEER_N_COMPLETION_TOKENS_MAX_ASSISTANT_AXIS) {
+        return NextResponse.json(
+          { message: `For assistant axis models the max n_tokens is ${STEER_N_COMPLETION_TOKENS_MAX_ASSISTANT_AXIS}` },
           { status: 400 },
         );
       }
@@ -674,6 +748,7 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       },
     };
     // check for saved outputs
+    // if assistant axis, don't look it up
 
     // check for default saved output
     let steerTypesToRun: SteerOutputType[] = [SteerOutputType.STEERED, SteerOutputType.DEFAULT];
@@ -684,7 +759,7 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       where: {
         modelId,
         type: SteerOutputType.DEFAULT,
-        inputTextChatTemplate: JSON.stringify(defaultChatMessagesSorted),
+        inputTextChatTemplateMd5: createHash('md5').update(JSON.stringify(defaultChatMessagesSorted)).digest('hex'),
         temperature: body.temperature,
         numTokens: body.n_tokens,
         freqPenalty: body.freq_penalty,
@@ -703,6 +778,16 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
         chatTemplate: JSON.parse(savedSteerDefaultOutput.outputTextChatTemplate || '[]'),
         logprobs: savedSteerDefaultOutput.logprobs ? JSON.parse(savedSteerDefaultOutput.logprobs) : null,
       };
+      // Set cached capMonitorOutput for assistant_axis
+      if (savedSteerDefaultOutput.capMonitorOutput) {
+        const cachedAxisItem = JSON.parse(savedSteerDefaultOutput.capMonitorOutput);
+        // Use the TypeScript client's FromJSON function to handle both snake_case and camelCase
+        const transformedItem = SteerCompletionChatPost200ResponseAssistantAxisInnerFromJSON(cachedAxisItem);
+        if (!toReturnResult.assistant_axis) {
+          toReturnResult.assistant_axis = [];
+        }
+        toReturnResult.assistant_axis.push(transformedItem);
+      }
       steerTypesToRun = steerTypesToRun.filter((type) => type !== SteerOutputType.DEFAULT);
     }
 
@@ -712,7 +797,7 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       where: {
         modelId,
         type: SteerOutputType.STEERED,
-        inputTextChatTemplate: JSON.stringify(steeredChatMessagesSorted),
+        inputTextChatTemplateMd5: createHash('md5').update(JSON.stringify(steeredChatMessagesSorted)).digest('hex'),
         temperature: body.temperature,
         numTokens: body.n_tokens,
         freqPenalty: body.freq_penalty,
@@ -763,6 +848,16 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       };
       toReturnResult.id = savedSteerSteeredOutputs[0].id;
       toReturnResult.shareUrl = `${NEXT_PUBLIC_URL}/steer/${savedSteerSteeredOutputs[0].id}`;
+      // Set cached capMonitorOutput for assistant_axis
+      if (savedSteerSteeredOutputs[0].capMonitorOutput) {
+        const cachedAxisItem = JSON.parse(savedSteerSteeredOutputs[0].capMonitorOutput);
+        // Use the TypeScript client's FromJSON function to handle both snake_case and camelCase
+        const transformedItem = SteerCompletionChatPost200ResponseAssistantAxisInnerFromJSON(cachedAxisItem);
+        if (!toReturnResult.assistant_axis) {
+          toReturnResult.assistant_axis = [];
+        }
+        toReturnResult.assistant_axis.push(transformedItem);
+      }
 
       steerTypesToRun = steerTypesToRun.filter((type) => type !== SteerOutputType.STEERED);
     }
@@ -790,6 +885,8 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
         },
       });
     }
+    // if there are no featuresWithVectors, then steerTypesToRun should only be [SteerOutputType.DEFAULT]
+    steerTypesToRun = featuresWithVectors.length === 0 ? [SteerOutputType.DEFAULT] : steerTypesToRun;
     let steerCompletionResults = await steerCompletionChat(
       modelId,
       steerTypesToRun,
@@ -806,9 +903,12 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       request.user,
       body.stream,
       body.steer_method,
+      undefined,
+      body.isAssistantAxis,
     );
     steerCompletionResults = steerCompletionResults as SteerCompletionChatPost200Response[];
-    for (const result of steerCompletionResults) {
+    for (let i = 0; i < steerCompletionResults.length; i += 1) {
+      const result = steerCompletionResults[i];
       for (const output of result.outputs) {
         if (output.type === SteerOutputType.DEFAULT) {
           toReturnResult[SteerOutputType.DEFAULT] = {
@@ -823,6 +923,10 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
             logprobs: output.logprobs ? output.logprobs : null,
           };
         }
+      }
+      // Extract assistant_axis data from non-streaming response
+      if (result.assistantAxis) {
+        toReturnResult.assistant_axis = result.assistantAxis;
       }
     }
     let input: { raw: string; chatTemplate: NPSteerChatMessage[] } | null = null;
@@ -841,6 +945,7 @@ export const POST = withOptionalUser(async (request: RequestOptionalUser) => {
       steerTypesToRun,
       input,
       request.user?.id,
+      toReturnResult.assistant_axis,
     );
 
     // return the result

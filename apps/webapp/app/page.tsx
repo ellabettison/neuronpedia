@@ -19,16 +19,21 @@ import {
   BookOpenText,
   Computer,
   Github,
+  Megaphone,
   Microscope,
   Newspaper,
+  Notebook,
   PictureInPicture,
   RocketIcon,
   School,
   Scroll,
   Search,
   Slack,
+  SmileIcon,
   Speech,
+  SquareActivity,
   Wand,
+  WandSparkles,
   Youtube,
 } from 'lucide-react';
 import { Metadata } from 'next';
@@ -36,6 +41,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import FeatureSelector from '../components/feature-selector/feature-selector';
 import InferenceSearcher from '../components/inference-searcher/inference-searcher';
+import { CAP_BLOG_URL, CAP_PAPER_URL } from './[modelId]/assistant-axis/shared';
 import HomeModels from './home/home-models';
 import HomeReleases from './home/home-releases';
 
@@ -88,113 +94,304 @@ export default function Page() {
           </Link>
         </div>
       )}
+      <div className="mx-5 mb-3.5 max-w-screen-sm rounded-lg border border-amber-600 bg-amber-50 px-4 py-3 text-center text-xs leading-snug text-amber-900">
+        <div className="mb-1 font-bold">⚠️ Google Cloud Issue</div>
+        We need help resolving an issue with Google Cloud that&apos;s blocking a key part of our work.
+        <br />
+        If you know someone senior and/or in management at Google Cloud, please{' '}
+        <a href="mailto:cloud@neuronpedia.org?subject=Google%20Cloud" className="underline">
+          email us
+        </a>
+        . Thanks!
+      </div>
 
-      <svg style={{ display: 'none' }}>
-        <filter id="glass-distortion">
-          <feTurbulence type="turbulence" baseFrequency="0.008" numOctaves="2" result="noise" />
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="77" />
-        </filter>
-      </svg>
+      <div className="flex flex-col items-center justify-center gap-x-5 gap-y-2 sm:flex-row">
+        <svg style={{ display: 'none' }}>
+          <filter id="glass-distortion">
+            <feTurbulence type="turbulence" baseFrequency="0.008" numOctaves="2" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale="77" />
+          </filter>
+        </svg>
 
-      <div className="relative z-0 mb-3 mt-3 flex min-h-[350px] w-full flex-col items-center justify-center rounded-lg px-3 sm:mx-0 sm:mb-8 sm:min-h-[280px] sm:w-[680px] sm:min-w-[680px] sm:px-0">
-        <div
-          style={{ backgroundImage: `url('/usedby/landscapebg.jpg')` }}
-          className="bg-size-[100%] absolute inset-[1px] -z-10 mx-3 rounded-[20px] bg-cover bg-top opacity-100 brightness-75 -hue-rotate-[5deg] saturate-[2.0] sm:mx-0 sm:px-0"
-        />
-        {/* <div className="absolute inset-[0px] -z-10 mx-3 rounded-[22px] bg-black opacity-[0.13] mix-blend-darken sm:mx-0 sm:px-0" /> */}
-
-        <div className="glass-card relative z-0 mb-0 flex h-full w-full min-w-full max-w-screen-sm flex-1 flex-col items-center justify-center gap-x-8 gap-y-1 rounded-lg px-2 py-16 shadow-sm sm:gap-y-0 sm:px-5 sm:py-7">
-          <div className="glass-filter" />
-          <div className="glass-overlay" />
-          <div className="glass-specular" />
-          <div className="glass-content">
-            {/* <svg style={{ display: 'none' }}>
-              <filter id="glass-distortion">
-                <feTurbulence type="turbulence" baseFrequency="0.008" numOctaves="2" result="noise" />
-                <feDisplacementMap in="SourceGraphic" in2="noise" scale="77" />
-              </filter>
-            </svg> */}
-
-            <div className="text-xs font-medium" style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}>
-              August 2025
-            </div>
-            <div
-              className="mt-1.5 text-base font-bold sm:text-[22px]"
-              style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.3)' }}
-            >
-              The Circuit Analysis Research Landscape
-            </div>
-            <div
-              className="mt-1.5 text-sm font-medium sm:text-[13px]"
-              style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.25)' }}
-            >
-              A collaboration by Anthropic, EleutherAI, Goodfire AI, Google DeepMind, and Decode.
-            </div>
-
-            <div className="mt-7 flex flex-col gap-y-2 sm:flex-row sm:gap-x-4">
-              <Link href="/graph/info" className="text-white">
-                <button type="button" className="glass-button h-12 min-h-12">
-                  <div className="glass-filter" />
-                  <div className="glass-overlay" />
-                  <div className="glass-specular" />
-                  <div className="glass-content flex flex-row items-center justify-center py-0 font-bold leading-none">
-                    <div className="flex flex-row items-center justify-center px-1">
-                      <Newspaper className="mr-2 h-5 w-5" />
-                      <div
-                        className="text-[14px] font-bold text-white"
-                        style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.3)' }}
-                      >
-                        Read the Post
+        <div className="relative z-0 order-2 mb-3 mt-3 flex w-full flex-col items-center justify-center rounded-lg px-3 sm:order-1 sm:mx-0 sm:mb-8 sm:h-[260px] sm:min-h-[260px] sm:w-[380px] sm:min-w-[380px] sm:px-0">
+          <div className="relative z-0 mb-0 flex h-full w-full min-w-full max-w-screen-sm flex-1 flex-col items-center justify-center gap-x-8 gap-y-1 rounded-3xl bg-gradient-to-t from-white via-white to-gBlue/40 px-8 py-7 text-center text-slate-600 shadow-md sm:gap-y-0 sm:px-5 sm:py-7">
+            <div className="content">
+              <div className="flex items-center justify-center text-xs font-bold text-sky-800">
+                <CustomTooltip
+                  side="right"
+                  trigger={
+                    <span className="flex flex-col items-center justify-center gap-y-[5px] text-xs font-semibold text-slate-600">
+                      <div className="flex flex-row items-center justify-center gap-x-1 rounded-full border border-gBlue bg-white px-4 py-0.5 text-[9.5px] font-bold uppercase text-gBlue transition-all hover:bg-gBlue hover:text-white">
+                        Dec 2025 - Rolling Release
                       </div>
-                    </div>
+                    </span>
+                  }
+                >
+                  <div className="mb-2 text-center text-sm font-bold text-slate-800">⚠️ Rolling Release</div>
+                  <div>
+                    Neuronpedia is finalizing data uploads and feature label generation, a process which we expect to be
+                    completed by <strong>February 14, 2026</strong>.
                   </div>
-                </button>
-              </Link>
-              <a href="/gemma-2-2b/graph" className="text-white">
-                <button type="button" className="glass-button h-12 min-h-12">
-                  <div className="glass-filter" />
-                  <div className="glass-overlay" />
-                  <div className="glass-specular" />
-                  <div className="glass-content flex flex-row items-center justify-center px-0 py-0 font-bold leading-none">
-                    <div className="flex flex-row items-center justify-center">
-                      <RocketIcon className="mr-2 h-5 w-5" />
-                      <div
-                        className="text-[11px] font-bold leading-tight text-white"
-                        style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}
-                      >
-                        Circuit
+                  <div className="mt-1">
+                    The artifacts in Gemma Scope 2{' '}
+                    <a
+                      href="https://huggingface.co/google/gemma-scope-2"
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-sky-700"
+                    >
+                      HuggingFace
+                    </a>{' '}
+                    are complete and available for use.
+                  </div>
+                </CustomTooltip>
+              </div>
+              <div className="mt-2 text-[24px] font-bold text-sky-700 sm:mt-3">
+                <span className="font-bold text-gBlue">Gemma Scope 2</span>
+              </div>
+              <div className="mt-1 text-xs font-medium text-slate-500 sm:mb-1 sm:mt-0">Google DeepMind</div>
+
+              <div className="mt-4 flex flex-col items-center justify-center gap-3 sm:mt-3 sm:grid sm:grid-cols-2 sm:gap-y-1.5">
+                <Link href="/gemma-scope-2" className="">
+                  <button type="button" className="h-12 min-h-12 w-36 transition-all hover:scale-105 sm:w-auto">
+                    <div className="flex flex-row items-center justify-center rounded-xl bg-gGreen px-5 py-2 text-white shadow sm:px-6">
+                      <WandSparkles className="mr-2.5 h-5 w-5" />
+                      <div className="text-[12px] font-semibold leading-snug">
+                        Browse
                         <br />
-                        Tracer
+                        Release
                       </div>
                     </div>
-                  </div>
-                </button>
-              </a>
-              <a
-                href="https://www.youtube.com/playlist?list=PL05yUGfKO5wP6S5_12z7LG30LZigRYx1e"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-white"
-              >
-                <button type="button" className="glass-button h-12 min-h-12">
-                  <div className="glass-filter" />
-                  <div className="glass-overlay" />
-                  <div className="glass-specular" />
-                  <div className="glass-content flex flex-row items-center justify-center px-0 py-0 font-bold leading-none">
-                    <div className="flex flex-row items-center justify-center">
-                      <Youtube className="mr-2 h-5 w-5" />
-                      <div
-                        className="text-[11px] font-bold leading-tight text-white"
-                        style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}
+                  </button>
+                </Link>
+                <a
+                  href="https://colab.research.google.com/drive/1NhWjg7n0nhfW--CjtsOdw5A5J_-Bzn4r"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className=""
+                >
+                  <button type="button" className="h-12 min-h-12 w-36 transition-all hover:scale-105 sm:w-auto">
+                    <div className="flex w-full flex-row items-center justify-center px-0 py-0 font-bold leading-none">
+                      <div className="flex w-full flex-row items-center justify-center rounded-xl bg-gYellow px-5 py-2 text-white shadow sm:px-5">
+                        <Notebook className="mr-2.5 h-5 w-5" />
+                        <div className="text-[12px] font-semibold leading-snug">
+                          Tutorial
+                          <br />
+                          Notebook
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </a>
+                <a
+                  href="https://huggingface.co/google/gemma-scope-2"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className=""
+                >
+                  <button type="button" className="h-12 min-h-12 w-36 transition-all hover:scale-105 sm:w-auto">
+                    <div className="flex w-full flex-row items-center justify-center px-0 py-0 font-bold leading-none">
+                      <div className="sm:px- flex w-full flex-row items-center justify-center rounded-xl bg-gRed px-5 py-2 text-white shadow">
+                        <SmileIcon className="mr-2.5 h-5 w-5" />
+                        <div className="text-[12px] font-semibold leading-snug">
+                          Hugging
+                          <br />
+                          Face
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </a>
+                <a
+                  href="https://deepmind.google/blog/gemma-scope-2-helping-the-ai-safety-community-deepen-understanding-of-complex-language-model-behavior/"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className=""
+                >
+                  <button type="button" className="h-12 min-h-12 w-36 transition-all hover:scale-105 sm:w-auto">
+                    <div className="flex w-full flex-row items-center justify-center px-0 py-0 font-bold leading-none">
+                      <div className="sm:px- flex w-full flex-row items-center justify-center rounded-xl bg-gBlue px-5 py-2 text-white shadow">
+                        <Megaphone className="mr-2.5 h-5 w-5" />
+                        <div className="text-[12px] font-semibold leading-snug">
+                          DeepMind
+                          <br />
+                          Blog
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-0 order-1 mb-3 mt-3 flex w-full flex-col items-center justify-center rounded-lg px-3 sm:order-2 sm:mx-0 sm:mb-8 sm:h-[280px] sm:min-h-[280px] sm:w-[400px] sm:min-w-[440px] sm:px-0">
+          <div className="relative z-0 mb-0 flex h-full w-full min-w-full max-w-screen-sm flex-1 flex-col items-center justify-center gap-x-8 gap-y-1 rounded-3xl bg-[#e5e4df] px-8 py-7 text-center text-slate-600 shadow-md sm:gap-y-0 sm:px-5 sm:py-7">
+            <div className="content">
+              <div className="flex items-center justify-center text-xs font-bold text-[#666663]">January 2026</div>
+              <div className="mt-2 text-[32px] font-bold text-sky-700 sm:mt-3">
+                <span className="font-bold text-[#bf4d43]">Assistant Axis</span>
+              </div>
+              <div className="mt-1 text-[13px] font-medium text-[#666663] sm:mt-0">Lu et al.</div>
+
+              <div className="mt-2 flex flex-col items-center justify-center gap-y-3 sm:mt-5 sm:flex-row sm:gap-x-2.5">
+                <Link href={CAP_BLOG_URL} className="">
+                  <button
+                    type="button"
+                    className="h-14 min-h-14 w-28 min-w-28 transition-all hover:scale-105 sm:w-auto"
+                  >
+                    <div className="flex h-14 min-h-14 flex-row items-center justify-center gap-x-1.5 rounded-xl bg-[#D4A274] px-5 py-2 text-[#262625] shadow sm:px-3">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        id="Anthropic-Icon--Streamline-Svg-Logos"
+                        height="24"
+                        width="24"
+                        className="flex-shrink-0"
                       >
-                        Watch
+                        <desc>Anthropic Icon Streamline Icon: https://streamlinehq.com</desc>
+                        <path
+                          fill="#181818"
+                          d="m13.788825 3.932 6.43325 16.136075h3.5279L17.316725 3.932H13.788825Z"
+                          stroke-width="0.25"
+                        />
+                        <path
+                          fill="#181818"
+                          d="m6.325375 13.682775 2.20125 -5.67065 2.201275 5.67065H6.325375ZM6.68225 3.932 0.25 20.068075h3.596525l1.3155 -3.3886h6.729425l1.315275 3.3886h3.59655L10.371 3.932H6.68225Z"
+                          stroke-width="0.25"
+                        />
+                      </svg>
+                      <div className="text-[12px] font-semibold leading-snug">Anthropic</div>
+                    </div>
+                  </button>
+                </Link>
+                <Link href="/llama3.3-70b-it/assistant-axis" className="">
+                  <button
+                    type="button"
+                    className="h-16 min-h-16 w-32 min-w-32 transition-all hover:scale-105 sm:w-auto"
+                  >
+                    <div className="flex h-16 min-h-16 flex-row items-center justify-center gap-x-1.5 rounded-xl bg-[#CC785C] px-5 py-2 text-[#000000] shadow sm:px-3">
+                      <SquareActivity className="h-5 w-5" />
+                      <div className="text-[14px] font-semibold leading-snug">
+                        Launch
                         <br />
                         Demo
                       </div>
                     </div>
-                  </div>
-                </button>
-              </a>
+                  </button>
+                </Link>
+                <Link href={CAP_PAPER_URL} className="">
+                  <button
+                    type="button"
+                    className="h-14 min-h-14 w-28 min-w-28 transition-all hover:scale-105 sm:w-auto"
+                  >
+                    <div className="flex h-14 min-h-14 flex-row items-center justify-center gap-x-1.5 rounded-xl bg-[#D4A274] px-5 py-2 text-[#262625] shadow sm:px-3">
+                      <Scroll className="h-5 w-5" />
+                      <div className="text-[12px] font-semibold leading-snug">Paper</div>
+                    </div>
+                  </button>
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="relative z-0 order-3 mb-3 mt-3 flex min-h-[350px] w-full flex-col items-center justify-center rounded-lg px-3 sm:mx-0 sm:mb-8 sm:h-[260px] sm:min-h-[260px] sm:w-[380px] sm:min-w-[380px] sm:px-0">
+          <div
+            style={{ backgroundImage: `url('/usedby/landscapebg.jpg')` }}
+            className="bg-size-[100%] absolute inset-[1px] -z-10 mx-3 rounded-[20px] bg-cover bg-top opacity-100 brightness-75 -hue-rotate-[5deg] saturate-[2.0] sm:mx-0 sm:px-0"
+          />
+
+          <div className="glass-card relative z-0 mb-0 flex h-full w-full min-w-full max-w-screen-sm flex-1 flex-col items-center justify-center gap-x-8 gap-y-1 rounded-lg px-2 py-16 shadow-sm sm:gap-y-0 sm:px-5 sm:py-7">
+            <div className="glass-filter" />
+            <div className="glass-overlay" />
+            <div className="glass-specular" />
+            <div className="glass-content">
+              <div className="text-xs font-medium" style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}>
+                August 2025
+              </div>
+              <div
+                className="mt-1.5 text-base font-bold leading-snug sm:text-[18px]"
+                style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.3)' }}
+              >
+                The Circuit Analysis
+                <br className="hidden sm:block" />
+                Research Landscape
+              </div>
+              <div
+                className="mt-1.5 text-sm font-medium sm:text-[12px]"
+                style={{ textShadow: '0 2px 3px rgba(0, 0, 0, 0.25)' }}
+              >
+                Anthropic, EleutherAI, Goodfire AI, Google DeepMind
+              </div>
+
+              <div className="mt-5 flex flex-col gap-y-2 sm:flex-row sm:gap-x-3">
+                <Link href="/graph/info" className="text-white">
+                  <button type="button" className="glass-button h-12 min-h-12">
+                    <div className="glass-filter" />
+                    <div className="glass-overlay" />
+                    <div className="glass-specular" />
+                    <div className="glass-content flex flex-row items-center justify-center px-0 py-0 font-bold leading-none">
+                      <div className="flex flex-row items-center justify-center px-1.5">
+                        <Newspaper className="mr-2 h-5 min-h-5 w-5 min-w-5" />
+                        <div
+                          className="text-[11px] font-bold leading-tight text-white"
+                          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}
+                        >
+                          Read Post
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </Link>
+                <a href="/gemma-2-2b/graph" className="text-white">
+                  <button type="button" className="glass-button h-12 min-h-12">
+                    <div className="glass-filter" />
+                    <div className="glass-overlay" />
+                    <div className="glass-specular" />
+                    <div className="glass-content flex flex-row items-center justify-center px-0 py-0 font-bold leading-none">
+                      <div className="flex flex-row items-center justify-center">
+                        <RocketIcon className="mr-2 h-5 w-5" />
+                        <div
+                          className="text-[11px] font-bold leading-tight text-white"
+                          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}
+                        >
+                          Circuit
+                          <br />
+                          Tracer
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </a>
+                <a
+                  href="https://www.youtube.com/playlist?list=PL05yUGfKO5wP6S5_12z7LG30LZigRYx1e"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-white"
+                >
+                  <button type="button" className="glass-button h-12 min-h-12">
+                    <div className="glass-filter" />
+                    <div className="glass-overlay" />
+                    <div className="glass-specular" />
+                    <div className="glass-content flex flex-row items-center justify-center px-0 py-0 font-bold leading-none">
+                      <div className="flex flex-row items-center justify-center">
+                        <Youtube className="mr-2 h-5 w-5" />
+                        <div
+                          className="text-[11px] font-bold leading-tight text-white"
+                          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.2)' }}
+                        >
+                          Watch
+                          <br />
+                          Demo
+                        </div>
+                      </div>
+                    </div>
+                  </button>
+                </a>
+              </div>
             </div>
           </div>
         </div>
@@ -693,7 +890,7 @@ export default function Page() {
             <div className="text-2xl font-black text-slate-700">Get Involved</div>
             <div className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 text-base font-medium leading-snug text-amber-100 sm:mt-3 sm:gap-x-3 sm:gap-y-3">
               <a
-                href="https://join.slack.com/t/opensourcemechanistic/shared_invite/zt-3i6srxrnb-Ibz0as5FE2YCsZh6WlrAwg"
+                href="https://join.slack.com/t/opensourcemechanistic/shared_invite/zt-3m2fulfeu-0LnVnF8yCrKJYQvWLuCQaQ"
                 target="_blank"
                 rel="noreferrer"
                 className=""

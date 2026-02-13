@@ -3,13 +3,15 @@ import { useGlobalContext } from '@/components/provider/global-provider';
 import SteerChatMessage from '@/components/steer/chat-message';
 import { LoadingSquare } from '@/components/svg/loading-square';
 import { IS_ACTUALLY_NEURONPEDIA_ORG } from '@/lib/env';
-import { ChatMessage, STEER_MAX_PROMPT_CHARS, SteerFeature } from '@/lib/utils/steer';
+import { ChatMessage, STEER_MAX_PROMPT_CHARS, STEER_MAX_PROMPT_CHARS_THINKING, SteerFeature } from '@/lib/utils/steer';
 import copy from 'copy-to-clipboard';
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import { ArrowUp, RotateCcw, Share, X } from 'lucide-react';
 import { NPSteerMethod } from 'neuronpedia-inference-client';
 import { useEffect, useRef } from 'react';
 import ReactTextareaAutosize from 'react-textarea-autosize';
+
+export const NNSIGHT_MODELS = ['llama3.3-70b-it', 'gpt-oss-20b'];
 
 export default function SteerCompletionChat({
   showSettingsOnMobile,
@@ -90,6 +92,15 @@ export default function SteerCompletionChat({
     }
   }
 
+  function removeLastFailedUserMessage(defaultMsgs: ChatMessage[], steeredMsgs: ChatMessage[]) {
+    if (defaultMsgs.length > 0 && defaultMsgs[defaultMsgs.length - 1].role === 'user') {
+      setDefaultChatMessages(defaultMsgs.slice(0, -1));
+    }
+    if (steeredMsgs.length > 0 && steeredMsgs[steeredMsgs.length - 1].role === 'user') {
+      setSteeredChatMessages(steeredMsgs.slice(0, -1));
+    }
+  }
+
   async function sendChat() {
     if (selectedFeatures.length === 0) {
       alert('Please select a demo, a preset mode, or add your own features to steer.');
@@ -111,10 +122,12 @@ export default function SteerCompletionChat({
     const defaultPromptToSendChars = newDefaultChatMessages.map((m) => m.content).join('').length;
     const steeredPromptToSendChars = newSteeredChatMessages.map((m) => m.content).join('').length;
 
-    // check for character limit
-    if (defaultPromptToSendChars >= STEER_MAX_PROMPT_CHARS || steeredPromptToSendChars >= STEER_MAX_PROMPT_CHARS) {
+    // // check for character limit
+    const maxPromptChars = NNSIGHT_MODELS.includes(modelId) ? STEER_MAX_PROMPT_CHARS_THINKING : STEER_MAX_PROMPT_CHARS;
+    if (defaultPromptToSendChars >= maxPromptChars || steeredPromptToSendChars >= maxPromptChars) {
       alert('Sorry, we limit the length of each chat conversation.\nPlease click Reset to start a new conversation.');
       setIsSteering(false);
+      removeLastFailedUserMessage(newDefaultChatMessages, newSteeredChatMessages);
       return;
     }
 
@@ -148,11 +161,9 @@ export default function SteerCompletionChat({
       });
       if (!response || !response.body) {
         alert('Sorry, your message could not be sent at this time. Please try again later.');
-
         showToastServerError();
         setIsSteering(false);
-        setDefaultChatMessages(newDefaultChatMessages.slice(0, -1));
-        setSteeredChatMessages(newSteeredChatMessages.slice(0, -1));
+        removeLastFailedUserMessage(newDefaultChatMessages, newSteeredChatMessages);
         return;
       }
       if (response.status !== 200) {
@@ -165,6 +176,9 @@ export default function SteerCompletionChat({
         } else {
           showToastServerError();
         }
+        setIsSteering(false);
+        removeLastFailedUserMessage(newDefaultChatMessages, newSteeredChatMessages);
+        return;
       }
 
       // check if the response is a stream
@@ -205,13 +219,12 @@ export default function SteerCompletionChat({
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
         showToastMessage('Steering aborted.');
-        setIsSteering(false);
-        setDefaultChatMessages([]);
-        setSteeredChatMessages([]);
       } else {
         console.error(error);
         showToastServerError();
       }
+      setIsSteering(false);
+      removeLastFailedUserMessage(newDefaultChatMessages, newSteeredChatMessages);
     }
   }
 
@@ -229,16 +242,18 @@ export default function SteerCompletionChat({
       <div className="relative flex h-full w-full flex-col sm:flex-row">
         <div className="hidden h-full flex-1 flex-col overflow-y-scroll bg-slate-100 px-5 py-2 text-left text-xs text-slate-400 sm:flex">
           <div className="sticky top-0.5 flex flex-row justify-center uppercase text-white sm:top-0">
-            <div className="select-none rounded-full px-5 py-1 text-[10px] font-bold text-slate-600">Normal</div>
+            <div className="select-none rounded-full bg-slate-100 px-5 py-1 text-[10px] font-bold text-slate-600">
+              Default
+            </div>
           </div>
           <div
             className="pb-5 pt-6 text-[14px] font-medium leading-normal text-slate-600 sm:pb-32 sm:pt-3"
             ref={normalEndRef}
           >
             {!isSteering && steeredChatMessages.length === 0 && (
-              <div className="w-full pl-3 pt-8 text-left text-xl text-slate-400">
-                Hey, {`I'm normal ${modelId}!`}
-                <div className="mt-6 text-sm text-slate-500">{`I'm the default, non-steered model.`}</div>
+              <div className="w-full pl-3 pt-8 text-left text-lg text-slate-400">
+                Hey, {`I'm the default ${modelId}!`}
+                <div className="mt-6 text-sm text-slate-500">{`I'm the default, non-steered and non-capped model.`}</div>
               </div>
             )}
             <SteerChatMessage chatMessages={defaultChatMessages} steered={false} />
@@ -247,32 +262,34 @@ export default function SteerCompletionChat({
         </div>
         <div className="flex h-full max-h-[calc(100dvh-48px)] min-h-[calc(100dvh-48px)] w-full flex-1 flex-col overflow-y-scroll bg-sky-100 px-3 py-2 text-left text-xs text-slate-400 sm:max-h-[calc(100dvh-76px)] sm:min-h-[calc(100dvh-76px)] sm:px-5">
           <div className="sticky top-0.5 flex flex-row justify-center uppercase text-sky-700 sm:top-0">
-            <div className="select-none rounded-full px-5 py-1 text-[10px] font-bold">Steered</div>
+            <div className="select-none rounded-full bg-sky-100 px-5 py-1 text-[10px] font-bold">
+              {steerMethod === NPSteerMethod.ProjectionCap ? 'Capped' : 'Steered'}
+            </div>
           </div>
           <div
             className="pb-28 pt-5 text-[14px] font-medium leading-normal text-slate-600 sm:pb-32 sm:pt-3"
             ref={steeredEndRef}
           >
             {!isSteering && steeredChatMessages.length === 0 && (
-              <div className="w-full pl-3 pr-3 pt-8 text-left text-xl text-sky-600">
-                Hey, {`I'm steered ${modelId}!`}
+              <div className="w-full pl-3 pr-3 pt-8 text-left text-lg text-sky-600">
+                Hey, {`I'm ${steerMethod === NPSteerMethod.ProjectionCap ? 'capped' : 'steered'} ${modelId}!`}
                 {selectedFeatures.length > 0 ? (
                   <div className="mt-5 text-sm text-sky-700">
-                    {`You're steering me to:`}
-                    {selectedFeatures.map((f) => {
-                      if (f.strength > 0) {
-                        return (
-                          <div key={f.index} className="ml-3 mt-1">
-                            - Boost {f.explanation}
-                          </div>
-                        );
-                      }
-                      return (
-                        <div key={f.index} className="ml-3 mt-1">
-                          - Reduce {f.explanation}
-                        </div>
-                      );
-                    })}
+                    {`Using method "${steerMethod
+                      .replaceAll('_', ' ')
+                      .toLowerCase()
+                      .replace(/\b\w/g, (c) => c.toUpperCase())}":`}
+                    {selectedFeatures.slice(0, 5).map((f) => (
+                      <div key={f.index} className="ml-3 mt-1">
+                        - {f.explanation}
+                      </div>
+                    ))}
+                    {selectedFeatures.length > 5 && (
+                      <div className="ml-3 mt-1">
+                        - and {selectedFeatures.length - 5} other feature
+                        {selectedFeatures.length - 5 !== 1 ? 's' : ''}
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-6 text-sm text-sky-700">
