@@ -26,6 +26,8 @@ const MESSAGE_TOKEN = ['<|message|>', '<|end_header_id|>'];
 const CHANNEL_TOKEN = '<|channel|>';
 const BOS_TOKEN = ['<bos>'];
 
+const BOTTOM_ACTIVATION_DATA_SOURCE = 'bottom';
+
 export default function ActivationItem({
   activation,
   // only use this if you want the activation colors to be relative to other activations in a list
@@ -72,6 +74,12 @@ export default function ActivationItem({
   const maxActivationValue = activation.maxValue || 0;
   const maxDfaTokenIndex = activation.dfaValues?.indexOf(Math.max(...activation.dfaValues)) || 0;
   const maxDfaValue = activation.dfaMaxValue || 0;
+
+  const isBottomActivation = activation.dataSource === BOTTOM_ACTIVATION_DATA_SOURCE;
+  const minActivationTokenIndex = activation.values ? activation.values.indexOf(Math.min(...activation.values)) : 0;
+
+  // For bottom activations, center around the most negative value; otherwise center around max
+  const anchorTokenIndex = isBottomActivation ? minActivationTokenIndex : maxActivationTokenIndex;
 
   let firstTokenShown = -1;
 
@@ -140,7 +148,7 @@ export default function ActivationItem({
 
     let toReturn = false;
     const isInMaxActBuffer =
-      tokenIndex > maxActivationTokenIndex - currentRange && tokenIndex < maxActivationTokenIndex + currentRange;
+      tokenIndex > anchorTokenIndex - currentRange && tokenIndex < anchorTokenIndex + currentRange;
     if (dfa && activation.dfaTargetIndex !== undefined && activation.dfaTargetIndex !== null) {
       const isInDFASourceBuffer =
         tokenIndex > maxDfaTokenIndex - currentRange && tokenIndex < maxDfaTokenIndex + currentRange;
@@ -193,10 +201,12 @@ export default function ActivationItem({
           )}
           <div className="hidden items-center justify-start gap-y-0.5 whitespace-nowrap py-1 pr-1 text-center font-mono text-[10px] leading-normal text-slate-600 sm:flex sm:w-16 sm:flex-col">
             <div className="rounded bg-slate-100 px-1.5 font-bold">
-              {activation.tokens && replaceHtmlAnomalies(activation.tokens[maxActivationTokenIndex])}
+              {activation.tokens && replaceHtmlAnomalies(activation.tokens[anchorTokenIndex])}
             </div>
-            <div className="font-sans font-semibold text-emerald-600">
-              {maxActivationValue?.toFixed(maxActivationValue.toFixed(2) === '0.00' ? 3 : 2)}
+            <div className={`font-sans font-semibold ${isBottomActivation ? 'text-rose-600' : 'text-emerald-600'}`}>
+              {isBottomActivation
+                ? activation.minValue?.toFixed(Math.abs(activation.minValue).toFixed(2) === '0.00' ? 3 : 2)
+                : maxActivationValue?.toFixed(maxActivationValue.toFixed(2) === '0.00' ? 3 : 2)}
             </div>
           </div>
         </div>
@@ -291,9 +301,7 @@ export default function ActivationItem({
             const tokenEndsWithSpace = tokenWithReplacedAnomalies.endsWith(' ');
             const tokenStartsWithSpace = tokenWithReplacedAnomalies.startsWith(' ');
             if (
-              dfa && dfaSplit
-                ? tokenIsInRangeOfAnchorToken(tokenIndex, maxActivationTokenIndex)
-                : shouldShowToken(tokenIndex)
+              dfa && dfaSplit ? tokenIsInRangeOfAnchorToken(tokenIndex, anchorTokenIndex) : shouldShowToken(tokenIndex)
             ) {
               return (
                 <span key={tokenIndex}>
@@ -342,9 +350,13 @@ export default function ActivationItem({
                           } ${!showRawTokens && tokenIsRoleToken(tokenIndex) && '-ml-2 mr-1 mt-1 rounded bg-slate-300'} ${!showRawTokens && prevTokenIsChannelToken(tokenIndex) && 'mt-1 rounded bg-slate-200'} ${overrideTextColor} ${overrideTextSize} `}
                           style={{
                             backgroundImage: makeActivationBackgroundColorWithDFA(
-                              overallMaxActivationValueInList,
-                              activation.values ? activation.values[tokenIndex] : 0,
-                              '52, 211, 153',
+                              isBottomActivation ? Math.abs(activation.minValue || 0) : overallMaxActivationValueInList,
+                              isBottomActivation
+                                ? Math.abs(activation.values ? activation.values[tokenIndex] : 0)
+                                : activation.values
+                                  ? activation.values[tokenIndex]
+                                  : 0,
+                              isBottomActivation ? '251, 113, 133' : '52, 211, 153',
                               (!dfaSplit || isExpanded) && activation.dfaValues ? activation.dfaValues[tokenIndex] : 0,
                               (!dfaSplit || isExpanded) && activation.dfaMaxValue ? activation.dfaMaxValue : 0,
                             ),
