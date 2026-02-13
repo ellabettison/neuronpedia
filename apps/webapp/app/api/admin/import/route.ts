@@ -210,8 +210,8 @@ export const GET = withOptionalUser(async (request: RequestOptionalUser) => {
             //   continue;
             // }
             // const batchNumber = parseInt(batchMatch[1], 10);
-            // if (batchNumber < 71) {
-            //   console.log(`Skipping batch ${batchNumber} (outside range 63-70)`);
+            // if (batchNumber < 7) {
+            //   console.log(`Skipping batch ${batchNumber} (outside range)`);
             //   continue;
             // }
             console.log('Importing explanations from', explanationsPath);

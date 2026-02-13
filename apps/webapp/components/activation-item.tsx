@@ -349,17 +349,21 @@ export default function ActivationItem({
                                 : '')
                           } ${!showRawTokens && tokenIsRoleToken(tokenIndex) && '-ml-2 mr-1 mt-1 rounded bg-slate-300'} ${!showRawTokens && prevTokenIsChannelToken(tokenIndex) && 'mt-1 rounded bg-slate-200'} ${overrideTextColor} ${overrideTextSize} `}
                           style={{
-                            backgroundImage: makeActivationBackgroundColorWithDFA(
-                              isBottomActivation ? Math.abs(activation.minValue || 0) : overallMaxActivationValueInList,
-                              isBottomActivation
-                                ? Math.abs(activation.values ? activation.values[tokenIndex] : 0)
-                                : activation.values
-                                  ? activation.values[tokenIndex]
+                            backgroundImage: (() => {
+                              const tokenValue = activation.values ? activation.values[tokenIndex] : 0;
+                              const isNegativeToken = tokenValue < 0;
+                              // For bottom activations with negative token values, use red; otherwise use green
+                              const useRed = isBottomActivation && isNegativeToken;
+                              return makeActivationBackgroundColorWithDFA(
+                                useRed ? Math.abs(activation.minValue || 0) : overallMaxActivationValueInList,
+                                useRed ? Math.abs(tokenValue) : tokenValue,
+                                useRed ? '253, 164, 175' : '52, 211, 153',
+                                (!dfaSplit || isExpanded) && activation.dfaValues
+                                  ? activation.dfaValues[tokenIndex]
                                   : 0,
-                              isBottomActivation ? '251, 113, 133' : '52, 211, 153',
-                              (!dfaSplit || isExpanded) && activation.dfaValues ? activation.dfaValues[tokenIndex] : 0,
-                              (!dfaSplit || isExpanded) && activation.dfaMaxValue ? activation.dfaMaxValue : 0,
-                            ),
+                                (!dfaSplit || isExpanded) && activation.dfaMaxValue ? activation.dfaMaxValue : 0,
+                              );
+                            })(),
                           }}
                         >
                           {tokenWithReplacedAnomalies}
