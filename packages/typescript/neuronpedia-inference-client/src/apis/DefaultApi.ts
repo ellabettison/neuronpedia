@@ -165,11 +165,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/all-batch`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/all-batch`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -208,11 +205,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/all`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/all`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -251,11 +245,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/single-batch`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/single-batch`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -294,11 +285,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/single`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/single`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -337,11 +325,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/source`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/source`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -380,11 +365,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/topk-by-token-batch`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/topk-by-token-batch`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -423,11 +405,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/activation/topk-by-token`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/activation/topk-by-token`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -466,11 +445,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/steer/completion-chat`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/steer/completion-chat`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -509,11 +485,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/steer/completion`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/steer/completion`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -552,11 +525,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/tokenize`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/tokenize`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -595,11 +565,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/util/sae-topk-by-decoder-cossim`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/util/sae-topk-by-decoder-cossim`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,
@@ -638,11 +605,8 @@ export class DefaultApi extends runtime.BaseAPI {
             headerParameters["X-SECRET-KEY"] = await this.configuration.apiKey("X-SECRET-KEY"); // SimpleSecretAuth authentication
         }
 
-
-        let urlPath = `/util/sae-vector`;
-
         const response = await this.request({
-            path: urlPath,
+            path: `/util/sae-vector`,
             method: 'POST',
             headers: headerParameters,
             query: queryParameters,

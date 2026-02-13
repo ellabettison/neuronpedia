@@ -13,6 +13,7 @@
     Do not edit the class manually.
 """  # noqa: E501
 
+
 # import models into model package
 from neuronpedia_inference_client.models.activation_all_batch_post200_response import ActivationAllBatchPost200Response
 from neuronpedia_inference_client.models.activation_all_batch_post200_response_results_inner import ActivationAllBatchPost200ResponseResultsInner
@@ -59,4 +60,3 @@ from neuronpedia_inference_client.models.util_sae_topk_by_decoder_cossim_post200
 from neuronpedia_inference_client.models.util_sae_topk_by_decoder_cossim_post_request import UtilSaeTopkByDecoderCossimPostRequest
 from neuronpedia_inference_client.models.util_sae_vector_post200_response import UtilSaeVectorPost200Response
 from neuronpedia_inference_client.models.util_sae_vector_post_request import UtilSaeVectorPostRequest
-
