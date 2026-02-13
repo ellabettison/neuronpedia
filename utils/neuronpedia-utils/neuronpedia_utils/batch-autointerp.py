@@ -40,6 +40,7 @@ from neuron_explainer.explanations.explainer import (
     MaxActivationAndLogitsExplainer,
     MaxActivationAndLogitsGeneralExplainer,
     MaxActivationExplainer,
+    PythonCodeExplainer,
     TokenActivationPairExplainer,
 )
 from neuron_explainer.explanations.prompt_builder import PromptFormat
@@ -59,9 +60,15 @@ VALID_EXPLAINER_TYPE_NAMES = [
     "np_max-act-logits",
     "np_max-act",
     "np_acts-logits-general",
+    "python-code",
 ]
 
 VALID_API_PROVIDERS = ["openai", "openrouter", "gemini"]
+
+# Activation selection mode: top (default) or bottom
+# top: use highest activations (standard behavior)
+# bottom: use lowest/most negative activations (values are multiplied by -1)
+VALID_ACTIVATION_SELECTION_MODES = ["top", "bottom"]
 
 # Global variable set by command-line argument
 API_PROVIDER = "openrouter"
@@ -161,6 +168,7 @@ FAILED_FEATURE_INDEXES_OUTPUT: List[str] = []
 IGNORE_FIRST_N_TOKENS: int = 0
 GENERATE_EMBEDDINGS: bool = True
 FRAC_NONZERO_THRESHOLD: float = 0.000001
+ACTIVATION_SELECTION_MODE: str = "top"
 
 
 def normalize_s3_path(path: str) -> str:
@@ -379,6 +387,44 @@ async def call_autointerp_openai_for_activations(
 
                 print(f"Traceback: {traceback.format_exc()}")
                 raise  # Re-raise to be caught by the outer try-except block
+        elif EXPLAINER_TYPE_NAME == "python-code":
+            for activation in activations_sorted_by_max_value:
+                activationRecord = ActivationRecord(
+                    tokens=replace_html_anomalies_and_special_chars(activation.tokens),
+                    activations=activation.values,
+                )
+                activationRecords.append(activationRecord)
+            explainer = PythonCodeExplainer(
+                model_name=model_name,
+                prompt_format=PromptFormat.HARMONY_V4,
+                max_concurrent=1,
+                base_api_url=base_api_url,
+                override_api_key=override_api_key,
+            )
+            try:
+                explanations = await asyncio.wait_for(
+                    explainer.generate_explanations(
+                        all_activation_records=activationRecords,
+                        max_tokens=2000,
+                        max_activation=calculate_max_activation(activationRecords),
+                        top_positive_logits=replace_html_anomalies_and_special_chars(
+                            feature.pos_str
+                        ),
+                        num_samples=1,
+                        reasoning_effort=REASONING_EFFORT,
+                    ),
+                    timeout=TIMEOUT_SECONDS,
+                )
+            except Exception as e:
+                print(
+                    f"Error in MaxActivationAndLogitsGeneralExplainer.generate_explanations for feature index {feature_index}:"
+                )
+                print(f"Exception type: {type(e).__name__}")
+                print(f"Exception message: {str(e)}")
+                import traceback
+
+                print(f"Traceback: {traceback.format_exc()}")
+                raise  # Re-raise to be caught by the outer try-except block
         elif EXPLAINER_TYPE_NAME == "np_max-act-logits":
             for activation in activations_sorted_by_max_value:
                 activationRecord = ActivationRecord(
@@ -473,15 +519,22 @@ async def call_autointerp_openai_for_activations(
         explanation = explanation[:-1]
     explanation = explanation.replace("\n", "").replace("\r", "")
 
+    # Append "(negative activations)" suffix for BOTTOM mode
+    if ACTIVATION_SELECTION_MODE == "bottom":
+        explanation = explanation + " (negative activations)"
+
     # print(f"Explanation: {explanation}  {feature.layer} {feature.index}")
 
     global queuedToSave
     # if the explanation is just "first token", use the top activation token
+    # Note: for BOTTOM mode, "(negative activations)" suffix is already appended above
+    # so we need to check the original explanation content
+    explanation_to_check = explanation.replace(" (negative activations)", "")
     if (
-        "unclear" in explanation.strip().lower()
-        or "unsure" in explanation.strip().lower()
-        or "first token" in explanation.strip().lower()
-        or len(explanation.strip()) == 0
+        "unclear" in explanation_to_check.strip().lower()
+        or "unsure" in explanation_to_check.strip().lower()
+        or "first token" in explanation_to_check.strip().lower()
+        or len(explanation_to_check.strip()) == 0
     ):
         # use the top activation token
         explanation = replace_html_anomalies_and_special_chars_single(
@@ -489,7 +542,10 @@ async def call_autointerp_openai_for_activations(
                 top_activation.values.index(max(top_activation.values))
             ].strip()
         )
-        if len(explanation.strip()) == 0:
+        # Append "(negative activations)" suffix for BOTTOM mode
+        if ACTIVATION_SELECTION_MODE == "bottom":
+            explanation = explanation + " (negative activations)"
+        if len(explanation.replace(" (negative activations)", "").strip()) == 0:
             # top activating token is empty, skip this feature
             FAILED_FEATURE_INDEXES_OUTPUT.append(feature_index)
             pass
@@ -619,12 +675,25 @@ async def start(activations_dir: str):
                     desc=f"Auto-Interping activations in {os.path.basename(activations_file)}",
                     leave=False,
                 ):
-                    # Sort and take top MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE activations
-                    activations_by_index[index] = sorted(
-                        activations_by_index[index],
-                        key=lambda x: x.maxValue,
-                        reverse=True,
-                    )[:MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE]
+                    # Sort and take top/bottom MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE activations
+                    if ACTIVATION_SELECTION_MODE == "bottom":
+                        # For BOTTOM mode: sort ascending (lowest first), take lowest N
+                        activations_by_index[index] = sorted(
+                            activations_by_index[index],
+                            key=lambda x: x.maxValue,
+                            reverse=False,
+                        )[:MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE]
+                        # Multiply all values by -1 so the explainer thinks these are high activations
+                        for activation in activations_by_index[index]:
+                            activation.values = [-v for v in activation.values]
+                            activation.maxValue = -activation.maxValue
+                    else:
+                        # For TOP mode (default): sort descending (highest first), take top N
+                        activations_by_index[index] = sorted(
+                            activations_by_index[index],
+                            key=lambda x: x.maxValue,
+                            reverse=True,
+                        )[:MAX_TOP_ACTIVATIONS_TO_SHOW_EXPLAINER_PER_FEATURE]
 
                     # enqueue it
                     # if features_by_index doesn't have "index", skip
@@ -676,6 +745,7 @@ class AutoInterpConfig:
     ignore_first_n_tokens: int
     generate_embeddings: bool
     frac_nonzero_threshold: float
+    activation_selection_mode: str
 
 
 def is_gemini_model(model_name: str) -> bool:
@@ -749,12 +819,21 @@ def main(
         0.000001,
         help="Minimum frac_nonzero threshold for a feature. Features below this threshold will be skipped.",
     ),
+    activation_selection_mode: str = typer.Option(
+        "top",
+        help="Activation selection mode: 'top' (default) uses highest activations, 'bottom' uses lowest/most negative activations (values multiplied by -1).",
+    ),
 ):
     if explainer_type_name not in VALID_EXPLAINER_TYPE_NAMES:
         raise ValueError(f"Invalid explainer type name: {explainer_type_name}")
 
     if explainer_model_name not in VALID_EXPLAINER_MODEL_NAMES:
         raise ValueError(f"Invalid explainer model name: {explainer_model_name}")
+
+    if activation_selection_mode not in VALID_ACTIVATION_SELECTION_MODES:
+        raise ValueError(
+            f"Invalid activation selection mode: {activation_selection_mode}. Must be one of: {VALID_ACTIVATION_SELECTION_MODES}"
+        )
 
     if api_provider not in VALID_API_PROVIDERS:
         raise ValueError(
@@ -800,7 +879,8 @@ def main(
         IGNORE_FIRST_N_TOKENS, \
         REASONING_EFFORT, \
         GENERATE_EMBEDDINGS, \
-        FRAC_NONZERO_THRESHOLD
+        FRAC_NONZERO_THRESHOLD, \
+        ACTIVATION_SELECTION_MODE
 
     GENERATE_EMBEDDINGS = generate_embeddings
     if GENERATE_EMBEDDINGS and not os.getenv("OPENAI_API_KEY"):
@@ -864,6 +944,7 @@ def main(
     AUTOINTERP_BATCH_SIZE = autointerp_batch_size
     IGNORE_FIRST_N_TOKENS = ignore_first_n_tokens
     FRAC_NONZERO_THRESHOLD = frac_nonzero_threshold
+    ACTIVATION_SELECTION_MODE = activation_selection_mode
     EXPLANATIONS_OUTPUT_DIR = output_dir
     if not EXPLANATIONS_OUTPUT_DIR:
         EXPLANATIONS_OUTPUT_DIR = os.path.join(
@@ -890,6 +971,7 @@ def main(
         ignore_first_n_tokens=IGNORE_FIRST_N_TOKENS,
         generate_embeddings=GENERATE_EMBEDDINGS,
         frac_nonzero_threshold=FRAC_NONZERO_THRESHOLD,
+        activation_selection_mode=ACTIVATION_SELECTION_MODE,
     )
 
     print("Auto-Interp Config\n", json.dumps(asdict(config), indent=2))
