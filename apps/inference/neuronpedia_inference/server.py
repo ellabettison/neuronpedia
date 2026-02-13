@@ -10,8 +10,17 @@ from typing import Callable
 
 import sentry_sdk
 import torch
-from chatspace.generation import VLLMSteeringConfig, VLLMSteerModel
 from dotenv import load_dotenv
+
+# vLLM only available on Linux
+try:
+    from chatspace.generation import VLLMSteeringConfig, VLLMSteerModel
+
+    VLLM_AVAILABLE = True
+except ImportError:
+    VLLMSteeringConfig = None  # type: ignore[misc, assignment]
+    VLLMSteerModel = None  # type: ignore[misc, assignment]
+    VLLM_AVAILABLE = False
 from fastapi import APIRouter, FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -22,7 +31,11 @@ from transformer_lens.hook_points import HookPoint
 
 # from transformer_lens.model_bridge.sources.transformers import boot
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from vllm import SamplingParams
+
+if VLLM_AVAILABLE:
+    from vllm import SamplingParams
+else:
+    SamplingParams = None  # type: ignore[misc, assignment]
 
 from neuronpedia_inference.args import list_available_options, parse_env_and_args
 from neuronpedia_inference.config import Config, get_saelens_neuronpedia_directory_df
@@ -168,13 +181,13 @@ async def initialize(
         for sae_set in args.sae_sets:
             args_sae_sets.extend(sae_set.split())
         logger.info("SAE sets: %s", args_sae_sets)
-        logger.info("Checking for invalid SAE sets...")
-        invalid_sae_sets = set(args_sae_sets) - set(sae_sets)
-        if invalid_sae_sets:
-            logger.error(
-                f"Error: Invalid SAE set(s): {', '.join(invalid_sae_sets)}. Use --list_models to see available options."
-            )
-            exit(1)
+        # logger.info("Checking for invalid SAE sets...")
+        # invalid_sae_sets = set(args_sae_sets) - set(sae_sets)
+        # if invalid_sae_sets:
+        #     logger.error(
+        #         f"Error: Invalid SAE set(s): {', '.join(invalid_sae_sets)}. Use --list_models to see available options."
+        #     )
+        #     exit(1)
 
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
@@ -220,8 +233,14 @@ async def initialize(
             model = StandardizedTransformer(
                 replace_tlens_model_id_with_hf_model_id(model_to_load),
                 dtype=STR_TO_DTYPE[config.model_dtype],
+                trust_remote_code=True,
             )
         elif args.chatspace:
+            if not VLLM_AVAILABLE:
+                raise RuntimeError(
+                    "chatspace mode requires vLLM, which is only available on Linux. "
+                    "Use a different model loading mode on macOS."
+                )
             logger.info("Loading model with chatspace VLLM...")
             model_to_load = (
                 config.override_model_id
@@ -281,24 +300,11 @@ async def initialize(
             for block in model.blocks:
                 add_hook_in_to_mlp(block.mlp)
             model.setup()
-        # else:
-        #     # Load the model utilizing the new transformerlens bridge
-        #     model = boot(
-        #         model_name=(
-        #             config.override_model_id
-        #             if config.override_model_id
-        #             else config.model_id
-        #         ),
-        #         device=args.device,
-        #         dtype=STR_TO_DTYPE[config.model_dtype],
-        #     )
-
-        #     model.enable_compatibility_mode(no_processing=True)
 
         Model._instance = model
         if isinstance(model, StandardizedTransformer):
             config.set_num_layers(model.num_layers)
-        elif isinstance(model, VLLMSteerModel):
+        elif VLLM_AVAILABLE and isinstance(model, VLLMSteerModel):
             config.set_num_layers(model.layer_count)
         else:
             config.set_num_layers(model.cfg.n_layers)
@@ -335,7 +341,7 @@ async def initialize(
     await asyncio.get_event_loop().run_in_executor(None, load_model_and_sae)
 
     # After model is loaded, preload chatspace model if needed
-    if args.chatspace:
+    if args.chatspace and VLLM_AVAILABLE:
         model = Model.get_instance()
         if isinstance(model, VLLMSteerModel):
             logger.info("Preloading chatspace model with a test generation...")
@@ -356,7 +362,7 @@ async def initialize(
             initialize_persona_data(model_id_for_persona)
 
     # After model is loaded, preload chatspace model if needed
-    if args.chatspace:
+    if args.chatspace and VLLM_AVAILABLE:
         model = Model.get_instance()
         if isinstance(model, VLLMSteerModel):
             logger.info("Preloading chatspace model with a test generation...")

@@ -4,16 +4,30 @@ import time
 from typing import Any
 
 import torch
-from chatspace.generation import VLLMSteerModel
-from chatspace.generation.vllm_steer_model import (
-    AddSpec,
-    LayerSteeringSpec,
-    ProjectionCapSpec,
-    SteeringOp,
-    SteeringSpec,
-)
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
+from neuronpedia_inference_client.models.np_logprob import NPLogprob
+from neuronpedia_inference_client.models.np_steer_chat_message import NPSteerChatMessage
+from neuronpedia_inference_client.models.np_steer_chat_result import NPSteerChatResult
+from neuronpedia_inference_client.models.np_steer_feature import NPSteerFeature
+from neuronpedia_inference_client.models.np_steer_method import NPSteerMethod
+from neuronpedia_inference_client.models.np_steer_type import NPSteerType
+from neuronpedia_inference_client.models.np_steer_vector import NPSteerVector
+from neuronpedia_inference_client.models.steer_completion_chat_post200_response import (
+    SteerCompletionChatPost200Response,
+)
+from neuronpedia_inference_client.models.steer_completion_chat_post200_response_assistant_axis_inner import (
+    SteerCompletionChatPost200ResponseAssistantAxisInner,
+)
+from neuronpedia_inference_client.models.steer_completion_chat_post200_response_assistant_axis_inner_turns_inner import (
+    SteerCompletionChatPost200ResponseAssistantAxisInnerTurnsInner,
+)
+from neuronpedia_inference_client.models.steer_completion_chat_post_request import (
+    SteerCompletionChatPostRequest,
+)
+from nnterp import StandardizedTransformer
+from transformer_lens import HookedTransformer
+
 from neuronpedia_inference.config import Config
 from neuronpedia_inference.endpoints.persona.monitor import (
     _truncate_content,
@@ -40,28 +54,29 @@ from neuronpedia_inference.inference_utils.vllm_monitor import get_monitor
 from neuronpedia_inference.sae_manager import SAEManager
 from neuronpedia_inference.shared import Model, with_request_lock
 from neuronpedia_inference.utils import make_logprob_from_logits
-from neuronpedia_inference_client.models.np_logprob import NPLogprob
-from neuronpedia_inference_client.models.np_steer_chat_message import NPSteerChatMessage
-from neuronpedia_inference_client.models.np_steer_chat_result import NPSteerChatResult
-from neuronpedia_inference_client.models.np_steer_feature import NPSteerFeature
-from neuronpedia_inference_client.models.np_steer_method import NPSteerMethod
-from neuronpedia_inference_client.models.np_steer_type import NPSteerType
-from neuronpedia_inference_client.models.np_steer_vector import NPSteerVector
-from neuronpedia_inference_client.models.steer_completion_chat_post200_response import (
-    SteerCompletionChatPost200Response,
-)
-from neuronpedia_inference_client.models.steer_completion_chat_post200_response_assistant_axis_inner import (
-    SteerCompletionChatPost200ResponseAssistantAxisInner,
-)
-from neuronpedia_inference_client.models.steer_completion_chat_post200_response_assistant_axis_inner_turns_inner import (
-    SteerCompletionChatPost200ResponseAssistantAxisInnerTurnsInner,
-)
-from neuronpedia_inference_client.models.steer_completion_chat_post_request import (
-    SteerCompletionChatPostRequest,
-)
-from nnterp import StandardizedTransformer
-from transformer_lens import HookedTransformer
-from vllm import SamplingParams
+
+# vLLM/chatspace only available on Linux
+try:
+    from chatspace.generation import VLLMSteerModel
+    from chatspace.generation.vllm_steer_model import (
+        AddSpec,
+        LayerSteeringSpec,
+        ProjectionCapSpec,
+        SteeringOp,
+        SteeringSpec,
+    )
+    from vllm import SamplingParams
+
+    VLLM_AVAILABLE = True
+except ImportError:
+    VLLM_AVAILABLE = False
+    VLLMSteerModel = None  # type: ignore[misc, assignment]
+    SamplingParams = None  # type: ignore[misc, assignment]
+    AddSpec = None  # type: ignore[misc, assignment]
+    LayerSteeringSpec = None  # type: ignore[misc, assignment]
+    ProjectionCapSpec = None  # type: ignore[misc, assignment]
+    SteeringOp = None  # type: ignore[misc, assignment]
+    SteeringSpec = None  # type: ignore[misc, assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +117,7 @@ async def health_check():
     monitor = get_monitor()
 
     # Set the model if it's a VLLMSteerModel
-    if isinstance(model, VLLMSteerModel):
+    if VLLM_AVAILABLE and isinstance(model, VLLMSteerModel):
         monitor.set_model(model)
 
     stats = await monitor.get_stats()
@@ -152,7 +167,11 @@ async def completion_chat(request: SteerCompletionChatPostRequest):
     custom_hf_model_id = config.custom_hf_model_id
 
     # Start background monitoring if enabled (once) for VLLMSteerModel
-    if ENABLE_BACKGROUND_MONITOR and isinstance(model, VLLMSteerModel):
+    if (
+        ENABLE_BACKGROUND_MONITOR
+        and VLLM_AVAILABLE
+        and isinstance(model, VLLMSteerModel)
+    ):
         monitor = get_monitor()
         monitor.set_model(model)
         if monitor._background_task is None:
@@ -164,10 +183,10 @@ async def completion_chat(request: SteerCompletionChatPostRequest):
     )
 
     if is_assistant_axis:
-        if not isinstance(model, VLLMSteerModel):
+        if not VLLM_AVAILABLE or not isinstance(model, VLLMSteerModel):
             return JSONResponse(
                 content={
-                    "error": "Assistant axis is only supported for Chatspace/VLLMSteer model"
+                    "error": "Assistant axis is only supported for Chatspace/VLLMSteer model (Linux only)"
                 },
                 status_code=400,
             )
@@ -228,8 +247,8 @@ async def completion_chat(request: SteerCompletionChatPostRequest):
             promptTokenized = model.to_tokens(
                 template_applied_prompt, prepend_bos=True
             )[0]
-        elif isinstance(model, StandardizedTransformer) or isinstance(
-            model, VLLMSteerModel
+        elif isinstance(model, StandardizedTransformer) or (
+            VLLM_AVAILABLE and isinstance(model, VLLMSteerModel)
         ):
             promptTokenized = model.tokenizer(
                 template_applied_prompt, add_special_tokens=False, return_tensors="pt"
@@ -241,8 +260,8 @@ async def completion_chat(request: SteerCompletionChatPostRequest):
         promptTokenized = model.tokenizer.apply_chat_template(
             promptChatFormatted, tokenize=True, add_generation_prompt=True
         )
-        if isinstance(model, StandardizedTransformer) or isinstance(
-            model, VLLMSteerModel
+        if isinstance(model, StandardizedTransformer) or (
+            VLLM_AVAILABLE and isinstance(model, VLLMSteerModel)
         ):
             if promptTokenized[0] == model.tokenizer.bos_token_id:
                 promptTokenized = promptTokenized[1:]
@@ -813,7 +832,7 @@ async def run_batched_generate(
                             else:
                                 default_partial_result_array.append(to_append)  # type: ignore
 
-                elif isinstance(model, VLLMSteerModel):
+                elif VLLM_AVAILABLE and isinstance(model, VLLMSteerModel):
                     if kwargs.get("freq_penalty"):
                         logger.warning(
                             "freq_penalty is not supported for VLLMSteerModel models, it will be ignored"
@@ -971,7 +990,11 @@ async def run_batched_generate(
 
             # After both STEERED and DEFAULT streaming completes for VLLMSteerModel,
             # run persona monitor if is_assistant_axis
-            if isinstance(model, VLLMSteerModel) and is_assistant_axis:
+            if (
+                VLLM_AVAILABLE
+                and isinstance(model, VLLMSteerModel)
+                and is_assistant_axis
+            ):
                 steered_output = "".join(steered_partial_result_array)
                 default_output = "".join(default_partial_result_array)
 
@@ -1197,7 +1220,7 @@ async def run_batched_generate(
                     None,
                 )  # type: ignore
                 yield format_sse_message(to_return.to_json())
-            elif isinstance(model, VLLMSteerModel):
+            elif VLLM_AVAILABLE and isinstance(model, VLLMSteerModel):
                 if kwargs.get("freq_penalty"):
                     logger.warning(
                         "freq_penalty is not supported for VLLMSteerModel models, it will be ignored"
@@ -1430,8 +1453,8 @@ def make_steer_completion_chat_response(
     # Handle token to string conversion for both model types
     if isinstance(model, HookedTransformer):
         prompt_raw = model.to_string(promptTokenized)  # type: ignore
-    elif isinstance(model, StandardizedTransformer) or isinstance(
-        model, VLLMSteerModel
+    elif isinstance(model, StandardizedTransformer) or (
+        VLLM_AVAILABLE and isinstance(model, VLLMSteerModel)
     ):
         prompt_raw = model.tokenizer.decode(promptTokenized)
     else:

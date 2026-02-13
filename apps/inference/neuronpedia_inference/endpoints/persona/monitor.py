@@ -8,9 +8,17 @@ import logging
 
 import numpy as np
 import torch
-from chatspace.generation import VLLMSteerModel
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
+
+# vLLM/chatspace only available on Linux
+try:
+    from chatspace.generation import VLLMSteerModel
+
+    VLLM_AVAILABLE = True
+except ImportError:
+    VLLM_AVAILABLE = False
+    VLLMSteerModel = None  # type: ignore[misc, assignment]
 
 from neuronpedia_inference.config import Config
 from neuronpedia_inference.shared import Model
@@ -158,10 +166,10 @@ async def persona_monitor(request: PersonaMonitorRequest) -> PersonaMonitorRespo
     # Get the existing model instance
     model = Model.get_instance()
     
-    if not isinstance(model, VLLMSteerModel):
+    if not VLLM_AVAILABLE or not isinstance(model, VLLMSteerModel):
         raise HTTPException(
             status_code=500,
-            detail="Persona monitoring requires ChatSpace/vLLM backend. "
+            detail="Persona monitoring requires ChatSpace/vLLM backend (Linux only). "
                    "The inference server must be started with --chatspace flag."
         )
     
