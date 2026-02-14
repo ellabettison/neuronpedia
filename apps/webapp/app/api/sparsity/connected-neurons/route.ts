@@ -210,14 +210,14 @@ function extractResidChannels(
 
   // Fill in all layers from minLayer to currentLayer-1 for backward channels
   for (const [channel, minLayer] of backwardChannelMinLayer) {
-    for (let layer = minLayer; layer < currentLayer; layer++) {
+    for (let layer = minLayer; layer < currentLayer; layer += 1) {
       addChannel(layer, channel);
     }
   }
 
   // Fill in all layers from currentLayer to maxLayer for forward channels
   for (const [channel, maxLayer] of forwardChannelMaxLayer) {
-    for (let layer = currentLayer; layer <= maxLayer; layer++) {
+    for (let layer = currentLayer; layer <= maxLayer; layer += 1) {
       addChannel(layer, channel);
     }
   }
@@ -328,7 +328,7 @@ export const GET = withOptionalUser(async (request: RequestOptionalUser) => {
     // Extract all neurons from trace data
     const allNeurons = extractAllNeurons(sparsityData.trace_forward, sparsityData.trace_backward);
     console.log('allNeurons', JSON.stringify(allNeurons, null, 2));
-    allNeurons.push({ layer: layer, neuron: index });
+    allNeurons.push({ layer, neuron: index });
 
     // Extract all resid channels with their layers
     const allResidChannels = extractResidChannels(

@@ -2,7 +2,6 @@ import { NeuronWithPartialRelations } from '@/prisma/generated/zod';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { HelpCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { useGlobalContext } from '../provider/global-provider';
 import { LoadingSquare } from '../svg/loading-square';
 
 type ResidChannel = {
@@ -164,8 +163,6 @@ function computeNeuronPositions(
   neurons: ConnectedNeuron[],
   leftBaseLeft: number, // Base position for backward neurons (left side)
   rightBaseLeft: number, // Base position for forward/current neurons (right side)
-  rowHeight: number,
-  horizontalSpacing: number,
 ): Map<string, { left: number; top: number; layerIndex: number; indexInLayer: number }> {
   const positions = new Map<string, { left: number; top: number; layerIndex: number; indexInLayer: number }>();
 
@@ -266,136 +263,136 @@ function computeNeuronPositions(
 }
 
 // Example data for testing - kept for reference and as fallback
-const exampleData: SparsityData = {
-  layer: 2,
-  neuron: 1717,
-  trace_forward: [
-    {
-      layer: 6,
-      neuron: 2723,
-      read_weight: -0.3709927499294281,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-    {
-      layer: 5,
-      neuron: 5078,
-      read_weight: -0.3670603036880493,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-    {
-      layer: 3,
-      neuron: 1775,
-      read_weight: -0.2945079207420349,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-    {
-      layer: 3,
-      neuron: 3801,
-      read_weight: -0.28046295046806335,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-    {
-      layer: 4,
-      neuron: 5333,
-      read_weight: 0.3004470467567444,
-      via_channel: 249,
-      write_weight: 0.19179122149944305,
-      children: null,
-    },
-    {
-      layer: 6,
-      neuron: 5877,
-      read_weight: -0.2590516209602356,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-    {
-      layer: 4,
-      neuron: 4129,
-      read_weight: 0.29327937960624695,
-      via_channel: 249,
-      write_weight: 0.19179122149944305,
-      children: null,
-    },
-    {
-      layer: 3,
-      neuron: 46,
-      read_weight: 0.29263511300086975,
-      via_channel: 249,
-      write_weight: 0.19179122149944305,
-      children: null,
-    },
-    {
-      layer: 6,
-      neuron: 7171,
-      read_weight: -0.2514074146747589,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-    {
-      layer: 3,
-      neuron: 3530,
-      read_weight: -0.2436772584915161,
-      via_channel: 506,
-      write_weight: -0.21734599769115448,
-      children: null,
-    },
-  ],
-  trace_backward: [
-    {
-      layer: 0,
-      neuron: 3244,
-      write_weight: -0.32191646099090576,
-      via_channel: 1451,
-      read_weight: 0.16233937442302704,
-      parents: null,
-    },
-    {
-      layer: 0,
-      neuron: 6260,
-      write_weight: 0.1729516088962555,
-      via_channel: 1451,
-      read_weight: 0.16233937442302704,
-      parents: null,
-    },
-    {
-      layer: 0,
-      neuron: 2493,
-      write_weight: -0.16061851382255554,
-      via_channel: 1451,
-      read_weight: 0.16233937442302704,
-      parents: null,
-    },
-    {
-      layer: 0,
-      neuron: 2818,
-      write_weight: 0.1580868810415268,
-      via_channel: 1451,
-      read_weight: 0.16233937442302704,
-      parents: null,
-    },
-    {
-      layer: 0,
-      neuron: 7374,
-      write_weight: -0.15642257034778595,
-      via_channel: 1451,
-      read_weight: 0.16233937442302704,
-      parents: null,
-    },
-  ],
-  neuronExplanations: [],
-  residChannelExplanations: [],
-};
+// const exampleData: SparsityData = {
+//   layer: 2,
+//   neuron: 1717,
+//   trace_forward: [
+//     {
+//       layer: 6,
+//       neuron: 2723,
+//       read_weight: -0.3709927499294281,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//     {
+//       layer: 5,
+//       neuron: 5078,
+//       read_weight: -0.3670603036880493,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//     {
+//       layer: 3,
+//       neuron: 1775,
+//       read_weight: -0.2945079207420349,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//     {
+//       layer: 3,
+//       neuron: 3801,
+//       read_weight: -0.28046295046806335,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//     {
+//       layer: 4,
+//       neuron: 5333,
+//       read_weight: 0.3004470467567444,
+//       via_channel: 249,
+//       write_weight: 0.19179122149944305,
+//       children: null,
+//     },
+//     {
+//       layer: 6,
+//       neuron: 5877,
+//       read_weight: -0.2590516209602356,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//     {
+//       layer: 4,
+//       neuron: 4129,
+//       read_weight: 0.29327937960624695,
+//       via_channel: 249,
+//       write_weight: 0.19179122149944305,
+//       children: null,
+//     },
+//     {
+//       layer: 3,
+//       neuron: 46,
+//       read_weight: 0.29263511300086975,
+//       via_channel: 249,
+//       write_weight: 0.19179122149944305,
+//       children: null,
+//     },
+//     {
+//       layer: 6,
+//       neuron: 7171,
+//       read_weight: -0.2514074146747589,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//     {
+//       layer: 3,
+//       neuron: 3530,
+//       read_weight: -0.2436772584915161,
+//       via_channel: 506,
+//       write_weight: -0.21734599769115448,
+//       children: null,
+//     },
+//   ],
+//   trace_backward: [
+//     {
+//       layer: 0,
+//       neuron: 3244,
+//       write_weight: -0.32191646099090576,
+//       via_channel: 1451,
+//       read_weight: 0.16233937442302704,
+//       parents: null,
+//     },
+//     {
+//       layer: 0,
+//       neuron: 6260,
+//       write_weight: 0.1729516088962555,
+//       via_channel: 1451,
+//       read_weight: 0.16233937442302704,
+//       parents: null,
+//     },
+//     {
+//       layer: 0,
+//       neuron: 2493,
+//       write_weight: -0.16061851382255554,
+//       via_channel: 1451,
+//       read_weight: 0.16233937442302704,
+//       parents: null,
+//     },
+//     {
+//       layer: 0,
+//       neuron: 2818,
+//       write_weight: 0.1580868810415268,
+//       via_channel: 1451,
+//       read_weight: 0.16233937442302704,
+//       parents: null,
+//     },
+//     {
+//       layer: 0,
+//       neuron: 7374,
+//       write_weight: -0.15642257034778595,
+//       via_channel: 1451,
+//       read_weight: 0.16233937442302704,
+//       parents: null,
+//     },
+//   ],
+//   neuronExplanations: [],
+//   residChannelExplanations: [],
+// };
 
 export default function ConnectedNeuronsPane({
   currentNeuron,
@@ -409,9 +406,9 @@ export default function ConnectedNeuronsPane({
   const [sparsityData, setSparsityData] = useState<SparsityData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [debugData, setDebugData] = useState<string | null>(null);
+  // const [debugData, setDebugData] = useState<string | null>(null);
 
-  const { setFeatureModalFeature, setFeatureModalOpen, getSource } = useGlobalContext();
+  // const { setFeatureModalFeature, setFeatureModalOpen, getSource } = useGlobalContext();
 
   // Fetch connected neurons data from API when currentNeuron changes
   useEffect(() => {
@@ -443,7 +440,7 @@ export default function ConnectedNeuronsPane({
         }
 
         const apiData = await response.json();
-        setDebugData(JSON.stringify(apiData, null, 2));
+        // setDebugData(JSON.stringify(apiData, null, 2));
         setSparsityData({
           layer: apiData.layer,
           neuron: apiData.neuron,
@@ -491,30 +488,20 @@ export default function ConnectedNeuronsPane({
     if (bottomOrTop === 'bottom') {
       const bottomExplanation = explanation.explanations.find((e) => e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
       return bottomExplanation ? bottomExplanation.description.replace(BOTTOM_EXPLANATION_SUFFIX, '') : null;
-    } else if (bottomOrTop === 'top') {
+    }
+    if (bottomOrTop === 'top') {
       return (
         explanation.explanations.find((e) => !e.description.includes(BOTTOM_EXPLANATION_SUFFIX))?.description || null
       );
-    } else {
-      // When bottomOrTop is undefined, return the first available explanation (prefer top, fallback to bottom)
-      const topExplanation = explanation.explanations.find((e) => !e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
-      if (topExplanation) {
-        return topExplanation.description;
-      }
-      // Fallback to bottom explanation if no top explanation exists
-      const bottomExplanation = explanation.explanations.find((e) => e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
-      return bottomExplanation ? bottomExplanation.description.replace(BOTTOM_EXPLANATION_SUFFIX, '') : null;
     }
-  };
-
-  // Helper function to get all explanations for a resid channel at a specific layer
-  const getResidChannelExplanations = (layer: number, channelIndex: number): { id: string; description: string }[] => {
-    if (!sparsityData?.residChannelExplanations) return [];
-    const residLayer = `${layer}-resid`;
-    const channelData = sparsityData.residChannelExplanations.find(
-      (e) => e.layer === residLayer && e.index === channelIndex.toString(),
-    );
-    return channelData?.explanations || [];
+    // When bottomOrTop is undefined, return the first available explanation (prefer top, fallback to bottom)
+    const topExplanation = explanation.explanations.find((e) => !e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
+    if (topExplanation) {
+      return topExplanation.description;
+    }
+    // Fallback to bottom explanation if no top explanation exists
+    const bottomExplanation = explanation.explanations.find((e) => e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
+    return bottomExplanation ? bottomExplanation.description.replace(BOTTOM_EXPLANATION_SUFFIX, '') : null;
   };
 
   // Helper function to get all explanations for a resid channel across ALL layers
@@ -575,8 +562,6 @@ export default function ConnectedNeuronsPane({
     connectedNeurons,
     backwardNeuronsBaseLeft, // Right edge of backward neurons area
     forwardNeuronsBaseLeft, // Left edge of forward neurons area
-    80,
-    horizontalSpacing,
   );
 
   // Get number of unique layers for height calculation
@@ -861,7 +846,7 @@ export default function ConnectedNeuronsPane({
                 // Calculate boundaries between layers based on neuron positions
                 const firstLayer = sortedLayerPositions[0];
                 const boundaries: number[] = [firstLayer.minY - 16]; // Start a bit above first layer's neurons
-                for (let i = 0; i < sortedLayerPositions.length - 1; i++) {
+                for (let i = 0; i < sortedLayerPositions.length - 1; i += 1) {
                   const currentLayerPos = sortedLayerPositions[i];
                   const nextLayerPos = sortedLayerPositions[i + 1];
 
@@ -947,7 +932,6 @@ export default function ConnectedNeuronsPane({
 
                       // Calculate the channel line dimensions (excluding current neuron's layer)
                       // We need to render segments above and below the current neuron's rectangle separately
-                      const currentNeuronLayer = sparsityData?.layer ?? 0;
                       const aboveSegments = segments.filter((s) => s.layer < currentNeuronLayer);
                       const belowSegments = segments.filter((s) => s.layer > currentNeuronLayer);
 
@@ -1153,7 +1137,6 @@ export default function ConnectedNeuronsPane({
                 // Rectangle dimensions - span the visual width of channel lines plus extra margin
                 // Channel lines are 5px wide, spaced 36px apart
                 // Visual span: from first line start to last line end = (n-1)*36 + 5
-                const visualChannelWidth = (resChannels.length - 1) * 36 + 5;
                 // Add extra width on each side (as if edge channels are wider)
                 const edgeChannelExtraWidth = 20;
                 const rectPadding = 30;
@@ -1167,7 +1150,6 @@ export default function ConnectedNeuronsPane({
 
                 // Use the shared arrow area height constant
                 const arrowAreaHeight = currentNeuronArrowAreaHeight;
-                const currentLayer = sparsityData?.layer ?? 0;
 
                 // Build a map of channel index to the backward trace layer (for hover behavior)
                 const channelToBackwardLayer = new Map<number, number>();
