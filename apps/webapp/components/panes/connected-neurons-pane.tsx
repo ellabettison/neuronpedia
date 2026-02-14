@@ -1,4 +1,6 @@
+import FeatureDashboard from '@/app/[modelId]/[layer]/[index]/feature-dashboard';
 import { NeuronWithPartialRelations } from '@/prisma/generated/zod';
+import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/shadcn/hover-card';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ExternalLinkIcon, HelpCircle } from 'lucide-react';
 import Link from 'next/link';
@@ -404,6 +406,7 @@ export default function ConnectedNeuronsPane({
   const router = useRouter();
   const [hoveredNeuronIndex, setHoveredNeuronIndex] = useState<string | null>(null);
   const [hoveredChannelId, setHoveredChannelId] = useState<string | null>(null);
+  const [hoveredFeature, setHoveredFeature] = useState<NeuronWithPartialRelations | undefined>();
 
   // State for API data
   const [sparsityData, setSparsityData] = useState<SparsityData | null>(null);
@@ -1485,91 +1488,134 @@ export default function ConnectedNeuronsPane({
                           {explanation}
                         </div>
                       )}
-                      {/* Neuron circle with tooltip */}
-                      <Tooltip.Provider delayDuration={0} skipDelayDuration={0}>
-                        <Tooltip.Root>
-                          <Tooltip.Trigger asChild>
-                            <div
-                              role="button"
-                              tabIndex={0}
-                              aria-label={`Go to neuron ${neuron.layer}-MLP @ ${neuron.index}`}
-                              className={`absolute h-3 w-3 cursor-pointer rounded-full border transition-colors ${bgColor} ${borderColor}`}
-                              style={{
-                                left: `${position.left}px`,
-                                top: `${position.top}px`,
-                              }}
-                              onClick={() =>
-                                router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`)
+                      {/* Neuron circle with hover card showing feature dashboard */}
+                      <HoverCard openDelay={300} closeDelay={400}>
+                        <HoverCardTrigger asChild>
+                          <div
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Go to neuron ${neuron.layer}-MLP @ ${neuron.index}`}
+                            className={`absolute h-3 w-3 cursor-pointer rounded-full border transition-colors ${bgColor} ${borderColor}`}
+                            style={{
+                              left: `${position.left}px`,
+                              top: `${position.top}px`,
+                            }}
+                            onClick={() =>
+                              router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`)
+                            }
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`);
                               }
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' || e.key === ' ') {
-                                  e.preventDefault();
-                                  router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`);
-                                }
-                              }}
-                              onMouseEnter={() => setHoveredNeuronIndex(neuron.index)}
-                              onMouseLeave={() => setHoveredNeuronIndex(null)}
-                            />
-                          </Tooltip.Trigger>
-                          <Tooltip.Portal>
-                            <Tooltip.Content
-                              className="min-w-[150px] max-w-[150px] rounded-md border border-slate-300 bg-white px-3 py-3 text-xs text-slate-600 shadow-md"
-                              sideOffset={3}
-                              side={neuron.direction === 'backward' ? 'left' : 'right'}
+                            }}
+                            onMouseEnter={() => {
+                              setHoveredNeuronIndex(neuron.index);
+                              // Fetch feature data if not already loaded for this neuron
+                              const neuronLayer = `${neuron.layer}-mlp`;
+                              if (
+                                hoveredFeature &&
+                                hoveredFeature.layer === neuronLayer &&
+                                hoveredFeature.index === neuron.index
+                              ) {
+                                return;
+                              }
+                              // Reset and fetch new data
+                              setHoveredFeature(undefined);
+                              fetch(
+                                `/api/feature/${currentNeuron?.modelId}/${neuronLayer}/${neuron.index}`,
+                                {
+                                  method: 'GET',
+                                  headers: { 'Content-Type': 'application/json' },
+                                },
+                              )
+                                .then((response) => response.json())
+                                .then((n: NeuronWithPartialRelations) => {
+                                  setHoveredFeature(n);
+                                })
+                                .catch((err) => {
+                                  console.error(`Error fetching neuron data: ${err}`);
+                                });
+                            }}
+                            onMouseLeave={() => setHoveredNeuronIndex(null)}
+                          />
+                        </HoverCardTrigger>
+                        <HoverCardContent
+                          className="max-h-[550px] w-[512px] min-w-[512px] max-w-[512px] overflow-y-auto border bg-white p-0"
+                          side={neuron.direction === 'backward' ? 'left' : 'right'}
+                          sideOffset={5}
+                        >
+                          {/* Original tooltip content */}
+                          <div className="border-b border-slate-200 px-3 py-3 text-xs text-slate-600">
+                            <Link
+                              href={`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`}
+                              className="flex flex-row items-center gap-x-1 font-mono text-xs font-bold uppercase text-sky-700 hover:underline"
                             >
-                              <Link
-                                href={`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`}
-                                className="flex flex-row items-center gap-x-1 font-mono text-xs font-bold uppercase text-sky-700 hover:underline"
-                              >
-                                {neuron.layer}-MLP @ {neuron.index} <ExternalLinkIcon className="h-3 w-3" />
-                              </Link>
-                              {allExplanations.length > 0 && (
-                                <div className="mb-0 mt-3 text-[9px] font-bold uppercase text-slate-500">
-                                  Explanation Labels
-                                </div>
-                              )}
-                              {allExplanations.length > 0 && (
-                                <div className="mb-3 ml-2">
-                                  {allExplanations
-                                    .sort((a, b) => {
-                                      const aIsBottom = a.description.includes('(negative activations)');
-                                      const bIsBottom = b.description.includes('(negative activations)');
-                                      return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
-                                    })
-                                    .map((exp) => {
-                                      const isBottomActivation = exp.description.includes('(negative activations)');
-                                      const colorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
-                                      return (
-                                        <div
-                                          key={exp.id}
-                                          className={`mb-0.5 text-[10px] font-medium leading-snug ${colorClass}`}
-                                        >
-                                          {exp.description.replace(' (negative activations)', '')}
-                                        </div>
-                                      );
-                                    })}
-                                </div>
-                              )}
-                              <div className="mb-0 mt-2">
-                                <span className="text-[9px] font-bold uppercase text-slate-500">
-                                  {neuron.direction !== 'backward' ? 'Reads From' : 'Writes To'}
-                                </span>
+                              {neuron.layer}-MLP @ {neuron.index} <ExternalLinkIcon className="h-3 w-3" />
+                            </Link>
+                            {allExplanations.length > 0 && (
+                              <div className="mb-0 mt-3 text-[9px] font-bold uppercase text-slate-500">
+                                Explanation Labels
                               </div>
-                              {neuron.resChannels.map((channel) => (
-                                <div key={channel.id} className="mb-1 font-mono text-[10px] font-medium">
-                                  <Link
-                                    href={`/${currentNeuron?.modelId}/${neuron.layer}-resid/${channel.index}`}
-                                    className="ml-2 uppercase text-sky-700 hover:underline"
-                                  >
-                                    {neuron.layer}-resid @ {channel.index}
-                                  </Link>
-                                </div>
-                              ))}
-                              <Tooltip.Arrow className="fill-slate-200" />
-                            </Tooltip.Content>
-                          </Tooltip.Portal>
-                        </Tooltip.Root>
-                      </Tooltip.Provider>
+                            )}
+                            {allExplanations.length > 0 && (
+                              <div className="mb-3 ml-2">
+                                {allExplanations
+                                  .sort((a, b) => {
+                                    const aIsBottom = a.description.includes('(negative activations)');
+                                    const bIsBottom = b.description.includes('(negative activations)');
+                                    return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                  })
+                                  .map((exp) => {
+                                    const isBottomActivation = exp.description.includes('(negative activations)');
+                                    const colorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                                    return (
+                                      <div
+                                        key={exp.id}
+                                        className={`mb-0.5 text-[10px] font-medium leading-snug ${colorClass}`}
+                                      >
+                                        {exp.description.replace(' (negative activations)', '')}
+                                      </div>
+                                    );
+                                  })}
+                              </div>
+                            )}
+                            <div className="mb-0 mt-2">
+                              <span className="text-[9px] font-bold uppercase text-slate-500">
+                                {neuron.direction !== 'backward' ? 'Reads From' : 'Writes To'}
+                              </span>
+                            </div>
+                            {neuron.resChannels.map((channel) => (
+                              <div key={channel.id} className="mb-1 font-mono text-[10px] font-medium">
+                                <Link
+                                  href={`/${currentNeuron?.modelId}/${neuron.layer}-resid/${channel.index}`}
+                                  className="ml-2 uppercase text-sky-700 hover:underline"
+                                >
+                                  {neuron.layer}-resid @ {channel.index}
+                                </Link>
+                              </div>
+                            ))}
+                          </div>
+                          {/* Feature dashboard */}
+                          {hoveredFeature?.activations &&
+                          hoveredFeature?.activations?.length > 0 &&
+                          hoveredFeature?.layer === `${neuron.layer}-mlp` &&
+                          hoveredFeature?.index === neuron.index ? (
+                            <div className="-mt-2 h-[386px] w-full">
+                              <FeatureDashboard
+                                key={`${hoveredFeature?.modelId}-${hoveredFeature?.layer}-${hoveredFeature?.index}`}
+                                initialNeuron={hoveredFeature}
+                                embed
+                                forceMiniStats
+                              />
+                            </div>
+                          ) : (
+                            <div className="flex h-[386px] w-full items-center justify-center">
+                              <LoadingSquare className="h-6 w-6" />
+                            </div>
+                          )}
+                        </HoverCardContent>
+                      </HoverCard>
                     </div>
                   );
                 })}
