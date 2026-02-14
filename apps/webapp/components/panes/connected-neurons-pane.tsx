@@ -1,49 +1,401 @@
 import { NeuronWithPartialRelations } from '@/prisma/generated/zod';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { HelpCircle } from 'lucide-react';
-import { useState } from 'react';
-
-const MAX_TOPK_COS_SIM_FEATURES_TO_FETCH = 50;
-const MAX_TOPK_TO_SHOW_INITIALLY = 10;
-const MAX_COSSIM_FEATURE_DESC_LENGTH = 128;
+import { useEffect, useState } from 'react';
+import { useGlobalContext } from '../provider/global-provider';
+import { LoadingSquare } from '../svg/loading-square';
 
 type ResidChannel = {
   id: string;
-  description: string;
-  layer: number;
   index: number;
 };
 
-const exampleResidChannels: ResidChannel[] = [
-  { id: 'layer5.res.5', description: 'dog toys', layer: 3, index: 5 },
-  { id: 'layer2.res.63', description: 'colors', layer: 2, index: 63 },
-  { id: 'layer8.res.82', description: 'speaking quietly', layer: 8, index: 82 },
-  { id: 'layer11.res.6', description: 'coffee mugs', layer: 11, index: 6 },
-];
+type TraceNode = {
+  layer: number;
+  neuron: number;
+  read_weight: number;
+  via_channel: number;
+  write_weight: number;
+  children?: TraceNode[] | null;
+  parents?: TraceNode[] | null;
+};
 
-const exampleConnectedNeurons = [
-  {
-    modelId: 'gemma-2-2b',
-    layer: 12,
-    index: '3425',
-    current: false,
-    resChannels: [exampleResidChannels[2], exampleResidChannels[3]],
-  },
-  {
-    modelId: 'gemma-2-2b',
-    layer: 16,
-    index: '25',
+type ConnectedNeuron = {
+  layer: number;
+  index: string;
+  current: boolean;
+  resChannels: ResidChannel[];
+  direction: 'forward' | 'backward' | 'current';
+  readWeight?: number;
+  writeWeight?: number;
+};
+
+type NeuronExplanation = {
+  modelId: string;
+  layer: string;
+  index: string;
+  explanations: { id: string; description: string }[];
+};
+
+type ResidChannelExplanation = {
+  modelId: string;
+  layer: string; // e.g., "0-resid", "2-resid"
+  index: string; // channel index
+  explanations: { id: string; description: string }[];
+};
+
+type SparsityData = {
+  layer: number;
+  neuron: number;
+  trace_forward: TraceNode[];
+  trace_backward: TraceNode[];
+  neuronExplanations: NeuronExplanation[];
+  residChannelExplanations: ResidChannelExplanation[];
+};
+
+// Helper function to extract all unique channels from trace data
+// Orders channels: input channels (from backward trace) on left, output channels (from forward trace) on right
+function extractChannels(traceForward: TraceNode[], traceBackward: TraceNode[]): ResidChannel[] {
+  const inputChannels = new Set<number>();
+  const outputChannels = new Set<number>();
+
+  const collectInputChannels = (nodes: TraceNode[]) => {
+    nodes.forEach((node) => {
+      inputChannels.add(node.via_channel);
+      if (node.parents) collectInputChannels(node.parents);
+    });
+  };
+
+  const collectOutputChannels = (nodes: TraceNode[]) => {
+    nodes.forEach((node) => {
+      outputChannels.add(node.via_channel);
+      if (node.children) collectOutputChannels(node.children);
+    });
+  };
+
+  collectInputChannels(traceBackward);
+  collectOutputChannels(traceForward);
+
+  // Order: input-only channels first, then channels that are both, then output-only channels
+  const inputOnlyChannels = Array.from(inputChannels)
+    .filter((c) => !outputChannels.has(c))
+    .sort((a, b) => a - b);
+  const bothChannels = Array.from(inputChannels)
+    .filter((c) => outputChannels.has(c))
+    .sort((a, b) => a - b);
+  const outputOnlyChannels = Array.from(outputChannels)
+    .filter((c) => !inputChannels.has(c))
+    .sort((a, b) => a - b);
+
+  const orderedChannels = [...inputOnlyChannels, ...bothChannels, ...outputOnlyChannels];
+
+  return orderedChannels.map((channelIndex) => ({
+    id: `channel.${channelIndex}`,
+    index: channelIndex,
+  }));
+}
+
+// Helper function to build connected neurons from trace data
+function buildConnectedNeurons(
+  currentLayer: number,
+  currentNeuronIndex: number,
+  traceForward: TraceNode[],
+  traceBackward: TraceNode[],
+  resChannels: ResidChannel[],
+): ConnectedNeuron[] {
+  const neurons: ConnectedNeuron[] = [];
+  const channelMap = new Map(resChannels.map((c) => [c.index, c]));
+
+  // Add backward trace neurons (upstream)
+  traceBackward.forEach((node) => {
+    const channel = channelMap.get(node.via_channel);
+    if (channel) {
+      neurons.push({
+        layer: node.layer,
+        index: String(node.neuron),
+        current: false,
+        resChannels: [channel],
+        direction: 'backward',
+        readWeight: node.read_weight,
+        writeWeight: node.write_weight,
+      });
+    }
+  });
+
+  // Add current neuron
+  const currentChannels = [
+    ...new Set([...traceForward.map((n) => n.via_channel), ...traceBackward.map((n) => n.via_channel)]),
+  ]
+    .map((idx) => channelMap.get(idx))
+    .filter((c): c is ResidChannel => c !== undefined);
+
+  neurons.push({
+    layer: currentLayer,
+    index: String(currentNeuronIndex),
     current: true,
-    resChannels: [exampleResidChannels[0], exampleResidChannels[1], exampleResidChannels[2]],
-  }, // current
-  {
-    modelId: 'gemma-2-2b',
-    layer: 20,
-    index: '253',
-    current: false,
-    resChannels: [exampleResidChannels[1], exampleResidChannels[3]],
-  },
-];
+    resChannels: currentChannels,
+    direction: 'current',
+  });
+
+  // Add forward trace neurons (downstream)
+  traceForward.forEach((node) => {
+    const channel = channelMap.get(node.via_channel);
+    if (channel) {
+      neurons.push({
+        layer: node.layer,
+        index: String(node.neuron),
+        current: false,
+        resChannels: [channel],
+        direction: 'forward',
+        readWeight: node.read_weight,
+        writeWeight: node.write_weight,
+      });
+    }
+  });
+
+  // Sort by layer, then by neuron index for consistent ordering
+  return neurons.sort((a, b) => a.layer - b.layer || a.index.localeCompare(b.index));
+}
+
+// Helper function to compute neuron positions grouped by layer
+// Backward neurons go on the left, forward/current neurons go on the right
+// Layer heights are based on the number of neurons in each layer
+function computeNeuronPositions(
+  neurons: ConnectedNeuron[],
+  leftBaseLeft: number, // Base position for backward neurons (left side)
+  rightBaseLeft: number, // Base position for forward/current neurons (right side)
+  rowHeight: number,
+  horizontalSpacing: number,
+): Map<string, { left: number; top: number; layerIndex: number; indexInLayer: number }> {
+  const positions = new Map<string, { left: number; top: number; layerIndex: number; indexInLayer: number }>();
+
+  // Separate neurons by direction
+  const backwardNeurons = neurons.filter((n) => n.direction === 'backward');
+  const forwardAndCurrentNeurons = neurons.filter((n) => n.direction !== 'backward');
+
+  // Group backward neurons by layer
+  const backwardLayerGroups = new Map<number, ConnectedNeuron[]>();
+  backwardNeurons.forEach((neuron) => {
+    const group = backwardLayerGroups.get(neuron.layer) || [];
+    group.push(neuron);
+    backwardLayerGroups.set(neuron.layer, group);
+  });
+
+  // Group forward/current neurons by layer
+  const forwardLayerGroups = new Map<number, ConnectedNeuron[]>();
+  forwardAndCurrentNeurons.forEach((neuron) => {
+    const group = forwardLayerGroups.get(neuron.layer) || [];
+    group.push(neuron);
+    forwardLayerGroups.set(neuron.layer, group);
+  });
+
+  // Get all unique layers for consistent vertical positioning
+  const allLayers = new Set([...backwardLayerGroups.keys(), ...forwardLayerGroups.keys()]);
+  const sortedLayers = Array.from(allLayers).sort((a, b) => a - b);
+
+  // Calculate neuron count per layer (max of backward and forward sides)
+  const neuronCountPerLayer = sortedLayers.map((layer) => {
+    const backwardCount = (backwardLayerGroups.get(layer) || []).length;
+    const forwardCount = (forwardLayerGroups.get(layer) || []).length;
+    return Math.max(backwardCount, forwardCount, 1); // At least 1
+  });
+
+  // Calculate cumulative top positions based on neuron counts
+  // Each layer gets height based on its neuron count
+  const neuronSpacing = 16; // Vertical space per neuron
+  const minLayerHeight = 40; // Minimum height for a layer
+  const layerGap = 20; // Gap between layers
+
+  const layerTops: number[] = [];
+  let currentTop = 52; // Starting position
+  sortedLayers.forEach((layer, idx) => {
+    layerTops.push(currentTop);
+    const layerHeight = Math.max(minLayerHeight, neuronCountPerLayer[idx] * neuronSpacing);
+    currentTop += layerHeight + layerGap;
+  });
+
+  // Compute positions for backward neurons (left side)
+  sortedLayers.forEach((layer, layerIndex) => {
+    const neuronsInLayer = backwardLayerGroups.get(layer) || [];
+    const layerBaseTop = layerTops[layerIndex];
+    const layerHeight = Math.max(minLayerHeight, neuronCountPerLayer[layerIndex] * neuronSpacing);
+    const layerCenterY = layerBaseTop + layerHeight / 2;
+
+    neuronsInLayer.forEach((neuron, indexInLayer) => {
+      // Same X position for all neurons in layer (at the left base)
+      const neuronLeft = leftBaseLeft;
+
+      // Spread neurons vertically within the layer, centered
+      const verticalOffset = (indexInLayer - (neuronsInLayer.length - 1) / 2) * neuronSpacing;
+      const neuronTop = layerCenterY + verticalOffset - 6; // -6 to center the circle
+
+      positions.set(neuron.index, {
+        left: neuronLeft,
+        top: neuronTop,
+        layerIndex,
+        indexInLayer,
+      });
+    });
+  });
+
+  // Compute positions for forward/current neurons (right side)
+  sortedLayers.forEach((layer, layerIndex) => {
+    const neuronsInLayer = forwardLayerGroups.get(layer) || [];
+    const layerBaseTop = layerTops[layerIndex];
+    const layerHeight = Math.max(minLayerHeight, neuronCountPerLayer[layerIndex] * neuronSpacing);
+    const layerCenterY = layerBaseTop + layerHeight / 2;
+
+    neuronsInLayer.forEach((neuron, indexInLayer) => {
+      // Same X position for all neurons in layer (at the right base)
+      const neuronLeft = rightBaseLeft;
+
+      // Spread neurons vertically within the layer, centered
+      const verticalOffset = (indexInLayer - (neuronsInLayer.length - 1) / 2) * neuronSpacing;
+      const neuronTop = layerCenterY + verticalOffset - 6; // -6 to center the circle
+
+      positions.set(neuron.index, {
+        left: neuronLeft,
+        top: neuronTop,
+        layerIndex,
+        indexInLayer,
+      });
+    });
+  });
+
+  return positions;
+}
+
+// Example data for testing - kept for reference and as fallback
+const exampleData: SparsityData = {
+  layer: 2,
+  neuron: 1717,
+  trace_forward: [
+    {
+      layer: 6,
+      neuron: 2723,
+      read_weight: -0.3709927499294281,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+    {
+      layer: 5,
+      neuron: 5078,
+      read_weight: -0.3670603036880493,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+    {
+      layer: 3,
+      neuron: 1775,
+      read_weight: -0.2945079207420349,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+    {
+      layer: 3,
+      neuron: 3801,
+      read_weight: -0.28046295046806335,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+    {
+      layer: 4,
+      neuron: 5333,
+      read_weight: 0.3004470467567444,
+      via_channel: 249,
+      write_weight: 0.19179122149944305,
+      children: null,
+    },
+    {
+      layer: 6,
+      neuron: 5877,
+      read_weight: -0.2590516209602356,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+    {
+      layer: 4,
+      neuron: 4129,
+      read_weight: 0.29327937960624695,
+      via_channel: 249,
+      write_weight: 0.19179122149944305,
+      children: null,
+    },
+    {
+      layer: 3,
+      neuron: 46,
+      read_weight: 0.29263511300086975,
+      via_channel: 249,
+      write_weight: 0.19179122149944305,
+      children: null,
+    },
+    {
+      layer: 6,
+      neuron: 7171,
+      read_weight: -0.2514074146747589,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+    {
+      layer: 3,
+      neuron: 3530,
+      read_weight: -0.2436772584915161,
+      via_channel: 506,
+      write_weight: -0.21734599769115448,
+      children: null,
+    },
+  ],
+  trace_backward: [
+    {
+      layer: 0,
+      neuron: 3244,
+      write_weight: -0.32191646099090576,
+      via_channel: 1451,
+      read_weight: 0.16233937442302704,
+      parents: null,
+    },
+    {
+      layer: 0,
+      neuron: 6260,
+      write_weight: 0.1729516088962555,
+      via_channel: 1451,
+      read_weight: 0.16233937442302704,
+      parents: null,
+    },
+    {
+      layer: 0,
+      neuron: 2493,
+      write_weight: -0.16061851382255554,
+      via_channel: 1451,
+      read_weight: 0.16233937442302704,
+      parents: null,
+    },
+    {
+      layer: 0,
+      neuron: 2818,
+      write_weight: 0.1580868810415268,
+      via_channel: 1451,
+      read_weight: 0.16233937442302704,
+      parents: null,
+    },
+    {
+      layer: 0,
+      neuron: 7374,
+      write_weight: -0.15642257034778595,
+      via_channel: 1451,
+      read_weight: 0.16233937442302704,
+      parents: null,
+    },
+  ],
+  neuronExplanations: [],
+  residChannelExplanations: [],
+};
 
 export default function ConnectedNeuronsPane({
   currentNeuron,
@@ -53,15 +405,234 @@ export default function ConnectedNeuronsPane({
   const [hoveredNeuronIndex, setHoveredNeuronIndex] = useState<string | null>(null);
   const [hoveredChannelId, setHoveredChannelId] = useState<string | null>(null);
 
+  // State for API data
+  const [sparsityData, setSparsityData] = useState<SparsityData | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [debugData, setDebugData] = useState<string | null>(null);
+
+  const { setFeatureModalFeature, setFeatureModalOpen, getSource } = useGlobalContext();
+
+  // Fetch connected neurons data from API when currentNeuron changes
+  useEffect(() => {
+    const fetchConnectedNeurons = async () => {
+      if (!currentNeuron?.modelId || !currentNeuron?.layer || !currentNeuron?.index) {
+        setSparsityData(null);
+        return;
+      }
+
+      // Extract numeric layer from layer string (e.g., "2-mlp" -> 2)
+      const layerMatch = currentNeuron.layer.match(/^(\d+)/);
+      if (!layerMatch) {
+        setError('Invalid layer format');
+        return;
+      }
+      const layerNum = parseInt(layerMatch[1], 10);
+
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const response = await fetch(
+          `/api/sparsity/connected-neurons?modelId=${encodeURIComponent(currentNeuron.modelId)}&layer=${layerNum}&index=${encodeURIComponent(currentNeuron.index)}`,
+        );
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || `API error: ${response.status}`);
+        }
+
+        const apiData = await response.json();
+        setDebugData(JSON.stringify(apiData, null, 2));
+        setSparsityData({
+          layer: apiData.layer,
+          neuron: apiData.neuron,
+          trace_forward: apiData.trace_forward,
+          trace_backward: apiData.trace_backward,
+          neuronExplanations: apiData.neuronExplanations || [],
+          residChannelExplanations: apiData.residChannelExplanations || [],
+        });
+      } catch (err) {
+        console.error('Failed to fetch connected neurons:', err);
+        setError(err instanceof Error ? err.message : 'Failed to fetch connected neurons');
+        setSparsityData(null);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchConnectedNeurons();
+  }, [currentNeuron?.modelId, currentNeuron?.layer, currentNeuron?.index]);
+
+  // Derive channels and connected neurons from trace data (only if we have data)
+  const resChannels = sparsityData ? extractChannels(sparsityData.trace_forward, sparsityData.trace_backward) : [];
+  const connectedNeurons = sparsityData
+    ? buildConnectedNeurons(
+        sparsityData.layer,
+        sparsityData.neuron,
+        sparsityData.trace_forward,
+        sparsityData.trace_backward,
+        resChannels,
+      )
+    : [];
+
+  // Helper function to get the first explanation for a neuron
+  const getNeuronExplanation = (
+    layer: number,
+    neuronIndex: string,
+    bottomOrTop: 'bottom' | 'top' | undefined,
+  ): string | null => {
+    if (!sparsityData?.neuronExplanations) return null;
+    const neuronLayer = `${layer}-mlp`;
+    const explanation = sparsityData.neuronExplanations.find((e) => e.layer === neuronLayer && e.index === neuronIndex);
+    if (!explanation?.explanations || explanation.explanations.length === 0) return null;
+
+    const BOTTOM_EXPLANATION_SUFFIX = ' (negative activations)';
+    if (bottomOrTop === 'bottom') {
+      const bottomExplanation = explanation.explanations.find((e) => e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
+      return bottomExplanation ? bottomExplanation.description.replace(BOTTOM_EXPLANATION_SUFFIX, '') : null;
+    } else if (bottomOrTop === 'top') {
+      return (
+        explanation.explanations.find((e) => !e.description.includes(BOTTOM_EXPLANATION_SUFFIX))?.description || null
+      );
+    } else {
+      // When bottomOrTop is undefined, return the first available explanation (prefer top, fallback to bottom)
+      const topExplanation = explanation.explanations.find((e) => !e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
+      if (topExplanation) {
+        return topExplanation.description;
+      }
+      // Fallback to bottom explanation if no top explanation exists
+      const bottomExplanation = explanation.explanations.find((e) => e.description.includes(BOTTOM_EXPLANATION_SUFFIX));
+      return bottomExplanation ? bottomExplanation.description.replace(BOTTOM_EXPLANATION_SUFFIX, '') : null;
+    }
+  };
+
+  // Helper function to get all explanations for a resid channel at a specific layer
+  const getResidChannelExplanations = (layer: number, channelIndex: number): { id: string; description: string }[] => {
+    if (!sparsityData?.residChannelExplanations) return [];
+    const residLayer = `${layer}-resid`;
+    const channelData = sparsityData.residChannelExplanations.find(
+      (e) => e.layer === residLayer && e.index === channelIndex.toString(),
+    );
+    return channelData?.explanations || [];
+  };
+
+  // Helper function to get all explanations for a resid channel across ALL layers
+  const getAllResidChannelExplanations = (
+    channelIndex: number,
+  ): { layer: string; explanations: { id: string; description: string }[] }[] => {
+    if (!sparsityData?.residChannelExplanations) return [];
+    return sparsityData.residChannelExplanations
+      .filter((e) => e.index === channelIndex.toString())
+      .map((e) => ({
+        layer: e.layer,
+        explanations: e.explanations,
+      }))
+      .sort((a, b) => {
+        // Sort by layer number
+        const layerA = parseInt(a.layer.split('-')[0], 10);
+        const layerB = parseInt(b.layer.split('-')[0], 10);
+        return layerA - layerB;
+      });
+  };
+
+  // Layout constants - channels are centered, neurons positioned relative to channels
+  const gapBetweenNeuronsAndChannels = 60;
+  // Visual channel width (from leftmost to rightmost channel line edge)
+  // Each channel is 5px wide, spaced 36px apart
+  const visualChannelWidth = (resChannels.length - 1) * 36 + 5;
+  const horizontalSpacing = 30;
+
+  // Calculate neuron extents to determine inner container width
+  const backwardNeurons = connectedNeurons.filter((n) => n.direction === 'backward');
+  const forwardNeurons = connectedNeurons.filter((n) => n.direction !== 'backward');
+
+  // Count max neurons per layer for width calculation
+  const getMaxInLayer = (neurons: ConnectedNeuron[]) => {
+    const counts = new Map<number, number>();
+    neurons.forEach((n) => counts.set(n.layer, (counts.get(n.layer) || 0) + 1));
+    return Math.max(0, ...counts.values());
+  };
+  const maxBackwardInLayer = getMaxInLayer(backwardNeurons);
+  const maxForwardInLayer = getMaxInLayer(forwardNeurons);
+
+  // Calculate widths needed on each side of channels
+  const backwardWidth = maxBackwardInLayer * horizontalSpacing + gapBetweenNeuronsAndChannels + 20;
+  const forwardWidth = maxForwardInLayer * horizontalSpacing + gapBetweenNeuronsAndChannels + 20;
+
+  // Inner container width: enough to hold backward neurons + channels + forward neurons
+  const innerContentWidth = backwardWidth + visualChannelWidth + forwardWidth;
+  const innerContentCenter = innerContentWidth / 2;
+
+  // Calculate absolute positions within the inner container
+  const channelStartX = innerContentCenter - visualChannelWidth / 2;
+  // Left neurons: same distance from leftmost channel as right neurons from rightmost channel
+  const backwardNeuronsBaseLeft = channelStartX - gapBetweenNeuronsAndChannels - 24;
+  const forwardNeuronsBaseLeft = channelStartX + visualChannelWidth + gapBetweenNeuronsAndChannels + 5;
+
+  // Compute neuron positions grouped by layer
+  const neuronPositions = computeNeuronPositions(
+    connectedNeurons,
+    backwardNeuronsBaseLeft, // Right edge of backward neurons area
+    forwardNeuronsBaseLeft, // Left edge of forward neurons area
+    80,
+    horizontalSpacing,
+  );
+
+  // Get number of unique layers for height calculation
+  const uniqueLayers = new Set(connectedNeurons.map((n) => n.layer)).size;
+
+  // For the current neuron, track which channels are inputs (backward) vs outputs (forward)
+  const inputChannelIds = new Set(sparsityData?.trace_backward.map((n) => `channel.${n.via_channel}`) ?? []);
+  const outputChannelIds = new Set(sparsityData?.trace_forward.map((n) => `channel.${n.via_channel}`) ?? []);
+
+  // Fixed height for current neuron rectangle (used for both rectangle and layer segment)
+  const currentNeuronRectHeight = 68;
+  // Height of the arrow/fade area above the current neuron rectangle
+  const currentNeuronArrowAreaHeight = 28;
+
+  // Compute layer label positions (vertically centered for each layer) with min/max for segment heights
+  const layerLabelPositions = (() => {
+    const layerGroups = new Map<number, number[]>();
+    connectedNeurons.forEach((neuron) => {
+      const position = neuronPositions.get(neuron.index);
+      if (position) {
+        const tops = layerGroups.get(neuron.layer) || [];
+        tops.push(position.top);
+        layerGroups.set(neuron.layer, tops);
+      }
+    });
+
+    const positions: { layer: number; centerY: number; minY: number; maxY: number }[] = [];
+    layerGroups.forEach((tops, layer) => {
+      const minTop = Math.min(...tops);
+      const maxTop = Math.max(...tops);
+      const centerY = (minTop + maxTop) / 2 + 6; // +6 for circle center
+      // Add padding around neurons (6 for circle radius + some margin)
+      const padding = 12;
+      positions.push({
+        layer,
+        centerY,
+        minY: minTop - padding,
+        maxY: maxTop + 12 + padding, // +12 for circle height
+      });
+    });
+
+    return positions.sort((a, b) => a.layer - b.layer);
+  })();
+
+  // Calculate where channels start vertically (used for label positioning)
+  const channelsStartY = layerLabelPositions.length > 0 ? layerLabelPositions[0].minY - 16 : 0;
+
   return (
     // TODO: hide if not relevant model
     <div
-      className={`mt-2 hidden flex-col gap-x-2 overflow-hidden rounded-lg border bg-white px-3 pb-4 pt-2 text-xs shadow transition-all sm:mt-3 ${
+      className={`mb-2 hidden flex-col gap-x-2 overflow-hidden rounded-lg border bg-white px-3 pb-4 pt-2 text-xs shadow transition-all sm:mb-3 ${
         true ? 'sm:flex' : 'sm:hidden'
       }`}
     >
       <div className="mb-1.5 flex w-full flex-row items-center justify-center gap-x-1 text-[10px] font-normal uppercase text-slate-400">
-        Connected Neurons
+        Explorer
         <Tooltip.Provider delayDuration={0} skipDelayDuration={0}>
           <Tooltip.Root>
             <Tooltip.Trigger asChild>
@@ -70,195 +641,846 @@ export default function ConnectedNeuronsPane({
               </button>
             </Tooltip.Trigger>
             <Tooltip.Portal>
-              <Tooltip.Content className="rounded bg-slate-500 px-3 py-2 text-xs text-white" sideOffset={5}>
-                TODO: description
+              <Tooltip.Content
+                className="rounded bg-slate-500 px-3 py-2 text-xs text-white"
+                sideOffset={5}
+                side="right"
+              >
+                Explores the neural network connections between neurons and channels. Hover over the vertical lines for
+                details on residual stream channels, or hover over the neurons for details on the neurons.
                 <Tooltip.Arrow className="fill-slate-500" />
               </Tooltip.Content>
             </Tooltip.Portal>
           </Tooltip.Root>
         </Tooltip.Provider>
       </div>
-      <div className="relative mx-8 mb-3 mt-1 min-h-96 flex-col">
-        {exampleResidChannels.map((channel, arrayIndex) => {
-          // Check if this channel is connected to the hovered neuron
-          const isConnectedToHoveredNeuron = hoveredNeuronIndex
-            ? exampleConnectedNeurons
-                .find((n) => n.index === hoveredNeuronIndex)
-                ?.resChannels.some((c) => c.id === channel.id)
-            : false;
-
-          // Check if this channel is connected to the current neuron
-          const isConnectedToCurrentNeuron = exampleConnectedNeurons
-            .find((n) => n.current)
-            ?.resChannels.some((c) => c.id === channel.id);
-
-          // Check if this channel is being hovered or connected to hovered neuron
-          const isHighlighted = hoveredChannelId === channel.id || isConnectedToHoveredNeuron;
-
-          const defaultBackground = isConnectedToCurrentNeuron
-            ? 'linear-gradient(to bottom, transparent 0%, rgba(3, 105, 161, 0.3) 10%, rgba(3, 105, 161, 0.3) 90%, transparent 100%)'
-            : 'linear-gradient(to bottom, transparent 0%, rgba(148, 163, 184, 0.3) 10%, rgba(148, 163, 184, 0.3) 90%, transparent 100%)';
-          const hoverBackground = isConnectedToCurrentNeuron
-            ? 'linear-gradient(to bottom, transparent 0%, #0369a1 10%, #0369a1 90%, transparent 100%)'
-            : 'linear-gradient(to bottom, transparent 0%, #94a3b8 10%, #94a3b8 90%, transparent 100%)';
-
-          return (
-            <Tooltip.Provider delayDuration={0} skipDelayDuration={0}>
-              <Tooltip.Root>
-                <Tooltip.Trigger asChild>
-                  <div
-                    key={channel.id}
-                    className={`absolute h-96 min-h-96 w-[5px] cursor-pointer rounded-sm`}
-                    style={{
-                      left: `${128 + arrayIndex * 24}px`,
-                      background: isHighlighted ? hoverBackground : defaultBackground,
-                      transition: 'background 0.3s ease',
-                    }}
-                    onMouseEnter={(e) => {
-                      setHoveredChannelId(channel.id);
-                      e.currentTarget.style.background = hoverBackground;
-                    }}
-                    onMouseLeave={(e) => {
-                      setHoveredChannelId(null);
-                      e.currentTarget.style.background = isConnectedToHoveredNeuron
-                        ? hoverBackground
-                        : defaultBackground;
-                    }}
-                  />
-                </Tooltip.Trigger>
-                <Tooltip.Portal>
-                  <Tooltip.Content
-                    className="rounded bg-slate-200 px-5 py-3 text-xs text-slate-600"
-                    sideOffset={3}
-                    side="left"
-                  >
-                    <div className="font-mono text-sm font-bold">{channel.id}</div>
-                    <div className="mb-3 text-[9px] font-bold uppercase text-slate-500">Residual Stream Channel</div>
-                    <div>{`"${channel.description}"`}</div>
-                    <div>Layer {channel.layer}</div>
-                    <div>Index {channel.index}</div>
-                    <div>[More...]</div>
-                    <Tooltip.Arrow className="fill-slate-200" />
-                  </Tooltip.Content>
-                </Tooltip.Portal>
-              </Tooltip.Root>
-            </Tooltip.Provider>
-          );
-        })}
-        {exampleConnectedNeurons.map((neuron, arrayIndex) => (
-          <div key={neuron.index}>
-            {neuron.resChannels.map((channel, channelArrayIndex) => {
-              const channelIndex = exampleResidChannels.findIndex((c) => c.id === channel.id);
-              const neuronLeft = 128 + exampleResidChannels.length * 28;
-              const neuronTop = 64 + arrayIndex * 116;
-              const channelLeft = 128 + channelIndex * 24;
-
-              // Check if this path should be highlighted
-              const isNeuronHovered = hoveredNeuronIndex === neuron.index;
-              const isChannelHovered = hoveredChannelId === channel.id;
-              const isHighlighted = isNeuronHovered || isChannelHovered;
-
-              return (
-                <svg
-                  key={`line-${neuron.index}-${channel.id}`}
-                  className="pointer-events-none absolute"
-                  style={{
-                    left: 2.5,
-                    top: 0,
-                    width: '100%',
-                    height: '100%',
-                    overflow: 'visible',
-                  }}
-                >
-                  <path
-                    d={`M ${channelLeft + 2.5} ${64 + arrayIndex * 116 + 40 * channelArrayIndex - 10} 
-                        Q ${channelLeft + 2.5 + (neuronLeft + 10 - channelLeft - 2.5) * 0.6} ${64 + arrayIndex * 116 + 40 * channelArrayIndex - 10},
-                          ${channelLeft + 2.5 + (neuronLeft + 10 - channelLeft - 2.5) * 0.7} ${(64 + arrayIndex * 116 + 40 * channelArrayIndex - 10 + neuronTop + 10) / 2}
-                        Q ${channelLeft + 2.5 + (neuronLeft + 10 - channelLeft - 2.5) * 0.85} ${neuronTop + 10},
-                          ${neuronLeft + 10} ${neuronTop + 10}`}
-                    stroke={
-                      isHighlighted
-                        ? neuron.current
-                          ? '#0369a1'
-                          : '#94a3b8'
-                        : neuron.current
-                          ? 'rgba(3, 105, 161, 0.3)'
-                          : 'rgba(148, 163, 184, 0.3)'
-                    }
-                    strokeWidth="2"
-                    fill="none"
-                    style={{ transition: 'stroke 0.3s ease' }}
-                  />
-                </svg>
-              );
-            })}
-            {/* <div
-              className="absolute h-5 w-5 cursor-pointer rounded-full border-4 border-sky-700 opacity-80 transition-all hover:opacity-100"
-              style={{ left: `${72 + exampleResidChannels.length * 28}px`, top: `${30 + arrayIndex * 128}px` }}
-            >
-              {neuron.modelId} @ {neuron.layer} #{neuron.index}
-            </div> */}
+      {error && <div className="mb-2 rounded bg-red-50 px-2 py-1 text-[10px] text-red-600">Error: {error}</div>}
+      <div
+        className="relative mb-3 mt-0 flex-col"
+        style={{
+          minHeight: `${Math.max(320, layerLabelPositions.length > 0 ? layerLabelPositions[layerLabelPositions.length - 1].maxY + 30 : 320)}px`,
+        }}
+      >
+        {/* Loading state - centered */}
+        {isLoading && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <LoadingSquare size={24} />
           </div>
-        ))}
+        )}
+        {/* No data state - centered */}
+        {!sparsityData && !isLoading && !error && (
+          <div className="absolute inset-0 flex items-center justify-center text-slate-400">
+            No connected neurons data available
+          </div>
+        )}
+        {/* Content - only render when we have data */}
+        {sparsityData && (
+          <>
+            {/* <div>{debugData}</div> */}
 
-        {exampleConnectedNeurons.map((neuron, arrayIndex) => {
-          // Check if this neuron is connected to the hovered channel
-          const isConnectedToHoveredChannel = hoveredChannelId
-            ? neuron.resChannels.some((c) => c.id === hoveredChannelId)
-            : false;
+            {/* Layer labels - absolutely positioned on far left of pane */}
+            {layerLabelPositions.map(({ layer, centerY }) => (
+              <div
+                key={`layer-label-${layer}`}
+                className="absolute text-[10px] font-medium text-slate-400"
+                style={{
+                  left: '8px',
+                  top: `${centerY}px`,
+                  transform: 'translateY(-50%)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Layer {layer}
+              </div>
+            ))}
 
-          return (
-            <Tooltip.Provider delayDuration={0} skipDelayDuration={0}>
-              <Tooltip.Root>
-                <Tooltip.Trigger asChild>
-                  <div
-                    key={neuron.index}
-                    className={`absolute h-5 w-5 cursor-pointer rounded-full transition-all ${
-                      neuron.current ? 'bg-sky-700' : 'bg-slate-400'
-                    }`}
-                    style={{
-                      left: `${128 + 8 + exampleResidChannels.length * 28}px`,
-                      top: `${64 + arrayIndex * 116}px`,
-                      opacity: isConnectedToHoveredChannel ? 1 : 1,
-                      transform: isConnectedToHoveredChannel ? 'scale(1.2)' : 'scale(1)',
-                      transition: 'transform 0.3s ease, opacity 0.3s ease',
-                    }}
-                    onMouseEnter={() => setHoveredNeuronIndex(neuron.index)}
-                    onMouseLeave={() => setHoveredNeuronIndex(null)}
-                  >
-                    {neuron.current ? <div className="ml-6 mt-0.5 text-[8px] font-bold text-sky-700">CURRENT</div> : ''}
-                    {/* <div>
-                    {neuron.modelId.toUpperCase()} @ {neuron.layer}
-                  </div>
-                  <div>{neuron.index}</div>
-                  <div>{neuron.resChannels.map((channel) => channel.description).join(', ')}</div> */}
-                  </div>
-                </Tooltip.Trigger>
-                <Tooltip.Portal>
-                  <Tooltip.Content
-                    className="rounded bg-slate-200 px-5 py-3 text-xs text-slate-600"
-                    sideOffset={3}
-                    side="right"
-                  >
-                    <div className="font-mono text-sm font-bold">
-                      sparse-model @ {neuron.layer} #{neuron.index}
+            {/* Inner container - centered in space right of layer labels */}
+            <div
+              className="relative"
+              style={{
+                width: `${innerContentWidth}px`,
+                height: '100%',
+                marginLeft: `calc(50% - ${innerContentWidth / 2}px - 6px)`, // Offset left to account for layer labels on left
+              }}
+            >
+              {/* Residual Stream label above channels */}
+              <div
+                className="absolute text-[10px] font-medium text-slate-400"
+                style={{
+                  // Center over the actual channel lines: from first channel to last channel + channel width
+                  left: `${channelStartX + ((resChannels.length - 1) * 36 + 5) / 2}px`,
+                  top: `${channelsStartY - 34}px`,
+                  transform: 'translateX(-50%)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                Residual Stream
+              </div>
+
+              {/* Connection lines between neurons and channels (rendered first so they appear below channels) */}
+              {connectedNeurons
+                .filter((neuron) => !neuron.current) // Skip current neuron - no connection lines for it
+                .map((neuron) => {
+                  const position = neuronPositions.get(neuron.index);
+                  if (!position) return null;
+
+                  return (
+                    <div key={`lines-${neuron.index}`}>
+                      {neuron.resChannels.map((channel) => {
+                        const channelIndex = resChannels.findIndex((c) => c.id === channel.id);
+                        const channelLeft = channelStartX + channelIndex * 36;
+                        const neuronLeft = position.left;
+                        const neuronTop = position.top;
+
+                        // Check if this path should be highlighted
+                        const isNeuronHovered = hoveredNeuronIndex === neuron.index;
+                        const isChannelHovered = hoveredChannelId === channel.id;
+
+                        const isHighlighted = isNeuronHovered || isChannelHovered;
+
+                        // Non-current neurons:
+                        // - Backward (upstream) neurons WRITE to the channel → arrow to channel
+                        // - Forward (downstream) neurons READ from the channel → arrow to neuron
+                        const isBackward = neuron.direction === 'backward';
+                        const isOutputLine = isBackward;
+
+                        const neuronConnectionY = neuronTop + 6;
+                        const channelConnectionY = neuronTop + 6;
+
+                        // Determine which side of the neuron to connect to based on direction
+                        // Backward neurons (left side): connect to right edge of neuron
+                        // Forward neurons (right side): connect to left edge of neuron
+                        const neuronCircleWidth = 12;
+                        const neuronEdgeX = isBackward ? neuronLeft + neuronCircleWidth : neuronLeft;
+
+                        const midX = channelLeft + 2.5 + (neuronEdgeX - channelLeft - 2.5) * 0.6;
+                        const midY = (channelConnectionY + neuronConnectionY) / 2;
+
+                        // Determine stroke color
+                        const strokeColor = isHighlighted
+                          ? '#64748b' // slate-500 - darker gray when highlighted
+                          : '#cbd5e1'; // slate-300 - gray by default
+
+                        // Create unique marker IDs
+                        const markerEndId = `arrow-end-${neuron.index}-${channel.id}`;
+                        const markerStartId = `arrow-start-${neuron.index}-${channel.id}`;
+
+                        const channelArrowOffset = isOutputLine ? -6 : 0;
+                        const adjustedNeuronX = neuronEdgeX - 2;
+                        const adjustedChannelX = channelLeft + 2 + channelArrowOffset;
+
+                        return (
+                          <svg
+                            key={`line-${neuron.index}-${channel.id}`}
+                            className="pointer-events-none absolute"
+                            style={{
+                              left: 2.5,
+                              top: 0,
+                              width: '100%',
+                              height: '100%',
+                              overflow: 'visible',
+                            }}
+                          >
+                            <defs>
+                              {/* Arrow pointing forward (toward end of path) */}
+                              <marker
+                                id={markerEndId}
+                                markerWidth="3"
+                                markerHeight="3"
+                                refX="2.7"
+                                refY="1.5"
+                                orient="auto"
+                                markerUnits="strokeWidth"
+                              >
+                                <path d="M0,0 L0,3 L3,1.5 z" fill={strokeColor} />
+                              </marker>
+                              {/* Arrow pointing backward (toward start of path, for outputs) */}
+                              <marker
+                                id={markerStartId}
+                                markerWidth="3"
+                                markerHeight="3"
+                                refX="0.3"
+                                refY="1.5"
+                                orient="auto"
+                                markerUnits="strokeWidth"
+                              >
+                                <path d="M3,0 L3,3 L0,1.5 z" fill={strokeColor} />
+                              </marker>
+                            </defs>
+                            <path
+                              d={`M ${adjustedChannelX} ${channelConnectionY} 
+                            Q ${midX} ${midY},
+                              ${adjustedNeuronX} ${neuronConnectionY}`}
+                              stroke={strokeColor}
+                              strokeWidth="2"
+                              fill="none"
+                              markerStart={isOutputLine ? `url(#${markerStartId})` : undefined}
+                              markerEnd={isOutputLine ? undefined : `url(#${markerEndId})`}
+                              style={{ transition: 'stroke 0.3s ease' }}
+                            />
+                          </svg>
+                        );
+                      })}
                     </div>
-                    <div className="mb-3 text-[9px] font-bold uppercase text-slate-500">Connected Neuron</div>
-                    <div className="mb-1">
-                      <span className="font-semibold">Resid Stream Channels</span>
+                  );
+                })}
+
+              {resChannels.map((channel, arrayIndex) => {
+                // Check if this channel is connected to the hovered neuron
+                const isConnectedToHoveredNeuron = hoveredNeuronIndex
+                  ? connectedNeurons
+                      .find((n) => n.index === hoveredNeuronIndex)
+                      ?.resChannels.some((c) => c.id === channel.id)
+                  : false;
+
+                // Check if this channel is in trace_backward (input) or trace_forward (output)
+                const isInputCh = sparsityData?.trace_backward.some((n) => n.via_channel === channel.index) ?? false;
+                const isOutputCh = sparsityData?.trace_forward.some((n) => n.via_channel === channel.index) ?? false;
+                const isConnectedCh = isInputCh || isOutputCh;
+
+                // Check if nothing is hovered
+                const nothingHoveredCh = hoveredChannelId === null && hoveredNeuronIndex === null;
+
+                // Check if this channel is being hovered or connected to hovered neuron, OR nothing hovered and connected
+                const isHighlighted =
+                  hoveredChannelId === channel.id || isConnectedToHoveredNeuron || (nothingHoveredCh && isConnectedCh);
+
+                // Text colors - light blue by default, solid blue when highlighted
+                const defaultTextColor = '#94a3b8'; // slate-400
+                const hoverTextColor = '#0369a1'; // sky-700
+
+                const channelHeight = Math.max(400, 64 + uniqueLayers * 80 + 40);
+
+                // Compute segment boundaries based on layer positions
+                const sortedLayerPositions = [...layerLabelPositions].sort((a, b) => a.layer - b.layer);
+
+                // Create segments for each layer - segments connect at midpoints between layer neuron ranges
+                const segments: { layer: number; top: number; height: number }[] = [];
+                const currentNeuronLayer = sparsityData?.layer ?? 0;
+
+                // Calculate boundaries between layers based on neuron positions
+                const firstLayer = sortedLayerPositions[0];
+                const boundaries: number[] = [firstLayer.minY - 16]; // Start a bit above first layer's neurons
+                for (let i = 0; i < sortedLayerPositions.length - 1; i++) {
+                  const currentLayerPos = sortedLayerPositions[i];
+                  const nextLayerPos = sortedLayerPositions[i + 1];
+
+                  // Boundary is midpoint between current layer's maxY and next layer's minY
+                  const boundary = (currentLayerPos.maxY + nextLayerPos.minY) / 2;
+                  boundaries.push(boundary);
+                }
+                // Add final boundary
+                const lastLayer = sortedLayerPositions[sortedLayerPositions.length - 1];
+                boundaries.push(lastLayer.maxY + 16);
+
+                // Create segments using the boundaries
+                sortedLayerPositions.forEach((layerPos, idx) => {
+                  let segmentTop = boundaries[idx];
+                  let segmentBottom = boundaries[idx + 1];
+
+                  // For current neuron's layer, use fixed height centered on centerY
+                  if (layerPos.layer === currentNeuronLayer) {
+                    segmentTop = layerPos.centerY - currentNeuronRectHeight / 2;
+                    segmentBottom = layerPos.centerY + currentNeuronRectHeight / 2;
+                  } else {
+                    // Adjust boundaries if adjacent to current neuron layer
+                    if (idx > 0) {
+                      const prevLayerPos = sortedLayerPositions[idx - 1];
+                      if (prevLayerPos.layer === currentNeuronLayer) {
+                        segmentTop = prevLayerPos.centerY + currentNeuronRectHeight / 2 + currentNeuronArrowAreaHeight;
+                      }
+                    }
+                    if (idx < sortedLayerPositions.length - 1) {
+                      const nextLayerPos = sortedLayerPositions[idx + 1];
+                      if (nextLayerPos.layer === currentNeuronLayer) {
+                        segmentBottom =
+                          nextLayerPos.centerY - currentNeuronRectHeight / 2 - currentNeuronArrowAreaHeight;
+                      }
+                    }
+                  }
+
+                  segments.push({
+                    layer: layerPos.layer,
+                    top: segmentTop,
+                    height: segmentBottom - segmentTop,
+                  });
+                });
+
+                // Calculate the actual channel height based on segments
+                const actualChannelHeight =
+                  segments.length > 0
+                    ? segments[segments.length - 1].top + segments[segments.length - 1].height
+                    : channelHeight;
+
+                return (
+                  <div key={channel.id} className="absolute" style={{ left: `${channelStartX + arrayIndex * 36}px` }}>
+                    {/* Channel number label */}
+                    <div
+                      className="absolute text-[9px] font-bold transition-colors"
+                      style={{
+                        top: `${channelsStartY - 16}px`,
+                        left: '50%',
+                        transform: 'translateX(-50%)',
+                        whiteSpace: 'nowrap',
+                        color: isHighlighted ? hoverTextColor : defaultTextColor,
+                      }}
+                    >
+                      {channel.index}
                     </div>
-                    {neuron.resChannels.map((channel) => (
-                      <div key={channel.id} className="mb-1">
-                        • {channel.id}: &quot;{channel.description}&quot;
+                    {/* Channel line - single hoverable element with one tooltip */}
+                    {(() => {
+                      // Check if this channel is in trace_backward (input) or trace_forward (output)
+                      const isInputChannel =
+                        sparsityData?.trace_backward.some((n) => n.via_channel === channel.index) ?? false;
+                      const isOutputChannel =
+                        sparsityData?.trace_forward.some((n) => n.via_channel === channel.index) ?? false;
+
+                      // Check if nothing is hovered
+                      const nothingHovered = hoveredChannelId === null && hoveredNeuronIndex === null;
+
+                      // Channel is highlighted if: hovered, connected to hovered neuron, OR nothing hovered and it's a connected channel
+                      const isChannelHovered = hoveredChannelId === channel.id;
+                      const isFullHighlight =
+                        isChannelHovered ||
+                        isConnectedToHoveredNeuron ||
+                        (nothingHovered && (isInputChannel || isOutputChannel));
+
+                      // Calculate the channel line dimensions (excluding current neuron's layer)
+                      // We need to render segments above and below the current neuron's rectangle separately
+                      const currentNeuronLayer = sparsityData?.layer ?? 0;
+                      const aboveSegments = segments.filter((s) => s.layer < currentNeuronLayer);
+                      const belowSegments = segments.filter((s) => s.layer > currentNeuronLayer);
+
+                      // Colors
+                      const defaultColor = 'rgba(3, 105, 161, 0.3)';
+                      const fullColor = '#0369a1';
+                      const fillColor = isFullHighlight ? fullColor : defaultColor;
+
+                      // Get all explanations for this channel
+                      const allExplanations = getAllResidChannelExplanations(channel.index);
+
+                      // Calculate trigger bounds based on all segments
+                      const allSegments = [...aboveSegments, ...belowSegments];
+                      const triggerTop = allSegments.length > 0 ? Math.min(...allSegments.map((s) => s.top)) : 0;
+                      const triggerBottom =
+                        allSegments.length > 0 ? Math.max(...allSegments.map((s) => s.top + s.height)) : 0;
+                      const triggerHeight = triggerBottom - triggerTop;
+
+                      return (
+                        <Tooltip.Provider delayDuration={0} skipDelayDuration={0}>
+                          <Tooltip.Root>
+                            <Tooltip.Trigger asChild>
+                              <div
+                                className="absolute w-[5px] cursor-pointer"
+                                style={{
+                                  top: `${triggerTop}px`,
+                                  height: `${triggerHeight}px`,
+                                }}
+                                onMouseEnter={() => setHoveredChannelId(channel.id)}
+                                onMouseLeave={() => setHoveredChannelId(null)}
+                              >
+                                {/* Segments above current neuron */}
+                                {aboveSegments.map((segment, idx) => (
+                                  <div
+                                    key={`above-${segment.layer}`}
+                                    className="absolute w-[5px]"
+                                    style={{
+                                      top: `${segment.top - triggerTop}px`,
+                                      height: `${segment.height}px`,
+                                      background:
+                                        idx === 0
+                                          ? `linear-gradient(to bottom, transparent 0%, ${fillColor} 20%, ${fillColor} 100%)`
+                                          : fillColor,
+                                      transition: 'background 0.3s ease',
+                                      borderRadius: idx === 0 ? '2px 2px 0 0' : '0',
+                                    }}
+                                  />
+                                ))}
+                                {/* Segments below current neuron */}
+                                {belowSegments.map((segment) => (
+                                  <div
+                                    key={`below-${segment.layer}`}
+                                    className="absolute w-[5px]"
+                                    style={{
+                                      top: `${segment.top - triggerTop}px`,
+                                      height: `${segment.height}px`,
+                                      background: fillColor,
+                                      transition: 'background 0.3s ease',
+                                    }}
+                                  />
+                                ))}
+                              </div>
+                            </Tooltip.Trigger>
+                            <Tooltip.Portal>
+                              <Tooltip.Content
+                                className="min-w-[240px] max-w-[240px] rounded border border-slate-200 bg-white px-5 py-3 text-xs text-slate-600 shadow-md"
+                                sideOffset={3}
+                                side={isOutputChannel && !isInputChannel ? 'left' : 'right'}
+                                align="center"
+                                avoidCollisions={false}
+                              >
+                                <div className="font-mono text-sm font-bold">Channel {channel.index}</div>
+                                {/* All layer explanations */}
+                                {allExplanations.length > 0 && (
+                                  <div className="mt-2">
+                                    <div className="mb-1 font-semibold">Explanations:</div>
+                                    {allExplanations.map((layerData) => (
+                                      <div key={layerData.layer} className="mb-2">
+                                        <div className="text-[10px] font-medium uppercase text-slate-400">
+                                          {layerData.layer}
+                                        </div>
+                                        {layerData.explanations.map((exp, idx) => (
+                                          <div key={exp.id} className="ml-2 text-[10px] italic text-slate-500">
+                                            {idx + 1}. &ldquo;{exp.description}&rdquo;
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {/* Writers: backward neurons + current if it outputs to this channel */}
+                                <div className="mt-2 font-semibold">Writers (→ channel):</div>
+                                {(sparsityData?.trace_backward ?? [])
+                                  .filter((n) => n.via_channel === channel.index)
+                                  .map((n) => (
+                                    <div key={`writer-${n.neuron}`} className="ml-2">
+                                      Layer {n.layer} #{n.neuron}{' '}
+                                      <span className="text-slate-400">(w: {n.write_weight.toFixed(3)})</span>
+                                    </div>
+                                  ))}
+                                {outputChannelIds.has(channel.id) && sparsityData && (
+                                  <div className="ml-2 font-medium text-sky-700">
+                                    Layer {sparsityData.layer} #{sparsityData.neuron} (current){' '}
+                                    <span className="font-normal text-sky-500">
+                                      (w:{' '}
+                                      {sparsityData.trace_forward
+                                        .find((n) => n.via_channel === channel.index)
+                                        ?.write_weight.toFixed(3) ?? 'N/A'}
+                                      )
+                                    </span>
+                                  </div>
+                                )}
+                                {/* Readers: forward neurons + current if it inputs from this channel */}
+                                <div className="mt-2 font-semibold">Readers (channel →):</div>
+                                {inputChannelIds.has(channel.id) && sparsityData && (
+                                  <div className="ml-2 font-medium text-sky-700">
+                                    Layer {sparsityData.layer} #{sparsityData.neuron} (current){' '}
+                                    <span className="font-normal text-sky-500">
+                                      (r:{' '}
+                                      {sparsityData.trace_backward
+                                        .find((n) => n.via_channel === channel.index)
+                                        ?.read_weight.toFixed(3) ?? 'N/A'}
+                                      )
+                                    </span>
+                                  </div>
+                                )}
+                                {(sparsityData?.trace_forward ?? [])
+                                  .filter((n) => n.via_channel === channel.index)
+                                  .map((n) => (
+                                    <div key={`reader-${n.neuron}`} className="ml-2">
+                                      Layer {n.layer} #{n.neuron}{' '}
+                                      <span className="text-slate-400">(r: {n.read_weight.toFixed(3)})</span>
+                                    </div>
+                                  ))}
+                                <Tooltip.Arrow className="fill-slate-200" />
+                              </Tooltip.Content>
+                            </Tooltip.Portal>
+                          </Tooltip.Root>
+                        </Tooltip.Provider>
+                      );
+                    })()}
+                    {/* Fade out at bottom */}
+                    {(() => {
+                      const isChannelHovered = hoveredChannelId === channel.id;
+                      // Check if this channel is an output channel (for bottom fade, only output channels should be highlighted by default)
+                      const isOutputChan =
+                        sparsityData?.trace_forward.some((n) => n.via_channel === channel.index) ?? false;
+                      // Check if nothing is hovered
+                      const nothingHovered = hoveredChannelId === null && hoveredNeuronIndex === null;
+
+                      // Channel color - light blue by default, turns solid blue when highlighted
+                      let channelColor: string;
+
+                      if (isConnectedToHoveredNeuron || isChannelHovered || (nothingHovered && isOutputChan)) {
+                        // Full opacity when hovered, connected to hovered neuron, or nothing hovered and this is an OUTPUT channel
+                        channelColor = '#0369a1';
+                      } else {
+                        // Default - light blue
+                        channelColor = 'rgba(3, 105, 161, 0.3)';
+                      }
+
+                      const fadeHeight = 16;
+
+                      return (
+                        <div
+                          className="absolute"
+                          style={{
+                            top: `${actualChannelHeight}px`,
+                            left: '0px',
+                            width: '5px',
+                            height: `${fadeHeight}px`,
+                            background: `linear-gradient(to bottom, ${channelColor} 0%, #ffffff 100%)`,
+                            transition: 'background 0.3s ease',
+                          }}
+                        />
+                      );
+                    })()}
+                  </div>
+                );
+              })}
+
+              {/* Render current neuron as a rounded rectangle spanning channel width */}
+              {(() => {
+                const currentNeuronData = connectedNeurons.find((n) => n.current);
+                if (!currentNeuronData) return null;
+
+                // Get the layer's centerY position from layerLabelPositions
+                const layerPosition = layerLabelPositions.find((lp) => lp.layer === currentNeuronData.layer);
+                if (!layerPosition) return null;
+
+                // Get input and output channel indices for display
+                const inputChannelIndices = (sparsityData?.trace_backward ?? [])
+                  .map((n) => n.via_channel)
+                  .sort((a, b) => a - b);
+                const outputChannelIndices = (sparsityData?.trace_forward ?? [])
+                  .map((n) => n.via_channel)
+                  .sort((a, b) => a - b);
+
+                // Unique channels for each side
+                const uniqueInputChannels = [...new Set(inputChannelIndices)];
+                const uniqueOutputChannels = [...new Set(outputChannelIndices)];
+
+                // Rectangle dimensions - span the visual width of channel lines plus extra margin
+                // Channel lines are 5px wide, spaced 36px apart
+                // Visual span: from first line start to last line end = (n-1)*36 + 5
+                const visualChannelWidth = (resChannels.length - 1) * 36 + 5;
+                // Add extra width on each side (as if edge channels are wider)
+                const edgeChannelExtraWidth = 20;
+                const rectPadding = 30;
+                const rectWidth = visualChannelWidth + edgeChannelExtraWidth * 2 + rectPadding * 2;
+                // Center the rectangle over the visual channel span
+                // Visual center of channels = channelStartX + visualChannelWidth / 2
+                const visualCenter = channelStartX + visualChannelWidth / 2;
+                const rectLeft = visualCenter - rectWidth / 2;
+                // Position vertically centered at the layer's centerY (same as segment)
+                const rectTop = layerPosition.centerY - currentNeuronRectHeight / 2;
+
+                // Use the shared arrow area height constant
+                const arrowAreaHeight = currentNeuronArrowAreaHeight;
+                const currentLayer = sparsityData?.layer ?? 0;
+
+                // Build a map of channel index to the backward trace layer (for hover behavior)
+                const channelToBackwardLayer = new Map<number, number>();
+                (sparsityData?.trace_backward ?? []).forEach((node) => {
+                  // Use the first (or any) backward layer for this channel
+                  if (!channelToBackwardLayer.has(node.via_channel)) {
+                    channelToBackwardLayer.set(node.via_channel, node.layer);
+                  }
+                });
+
+                return (
+                  <>
+                    {/* Arrows/fades above rectangle for each channel */}
+                    {resChannels.map((channel, idx) => {
+                      const channelX = channelStartX + idx * 36 + 2; // Center of 5px line
+                      const isInputChannel = uniqueInputChannels.includes(channel.index);
+
+                      // Check if nothing is hovered
+                      const nothingHovered = hoveredChannelId === null && hoveredNeuronIndex === null;
+
+                      // Hover detection - simplified (no layer-specific hover)
+                      const isConnectedToHoveredNeuron = hoveredNeuronIndex
+                        ? connectedNeurons
+                            .find((n) => n.index === hoveredNeuronIndex)
+                            ?.resChannels.some((c) => c.id === channel.id)
+                        : false;
+                      const isChannelHovered = hoveredChannelId === channel.id;
+                      // Full highlight if: channel hovered, connected neuron hovered, OR nothing hovered and this is an INPUT channel
+                      const isFullHighlight =
+                        isChannelHovered || isConnectedToHoveredNeuron || (nothingHovered && isInputChannel);
+
+                      // Colors
+                      const defaultColor = 'rgba(3, 105, 161, 0.3)';
+                      const fullColor = '#0369a1';
+
+                      const fillColor = isFullHighlight ? fullColor : defaultColor;
+
+                      if (isInputChannel) {
+                        // Draw arrow pointing down for input channels
+                        // Arrow head is 8px tall, line fills the rest
+                        const arrowHeadHeight = 8;
+                        const lineHeight = arrowAreaHeight - arrowHeadHeight;
+
+                        return (
+                          <svg
+                            key={`arrow-input-${channel.id}`}
+                            className="absolute cursor-pointer"
+                            style={{
+                              left: `${channelX - 6}px`,
+                              top: `${rectTop - arrowAreaHeight}px`,
+                              width: '13px',
+                              height: `${arrowAreaHeight}px`,
+                            }}
+                            viewBox={`0 0 13 ${arrowAreaHeight}`}
+                            onMouseEnter={() => setHoveredChannelId(channel.id)}
+                            onMouseLeave={() => setHoveredChannelId(null)}
+                          >
+                            {/* Vertical line */}
+                            <rect
+                              x="4"
+                              y="0"
+                              width="5"
+                              height={lineHeight}
+                              fill={fillColor}
+                              style={{ transition: 'fill 0.3s ease' }}
+                            />
+                            {/* Arrow head pointing down */}
+                            <path
+                              d={`M6.5 ${arrowAreaHeight}L0 ${lineHeight}H13L6.5 ${arrowAreaHeight}Z`}
+                              fill={fillColor}
+                              style={{ transition: 'fill 0.3s ease' }}
+                            />
+                          </svg>
+                        );
+                      }
+
+                      // Don't draw fades above rectangle if there are no backward trace neurons
+                      if (uniqueInputChannels.length === 0) {
+                        return null;
+                      }
+
+                      // Draw fade to white for non-input channels (covers the channel line)
+                      const fadeBackground = isFullHighlight
+                        ? `linear-gradient(to bottom, ${fullColor} 0%, #ffffff 85%)`
+                        : `linear-gradient(to bottom, ${defaultColor} 0%, #ffffff 85%)`;
+
+                      return (
+                        <div
+                          key={`fade-${channel.id}`}
+                          className="absolute cursor-pointer"
+                          style={{
+                            left: `${channelX - 2}px`,
+                            top: `${rectTop - arrowAreaHeight}px`,
+                            width: '5px',
+                            height: `${arrowAreaHeight}px`,
+                            background: fadeBackground,
+                            transition: 'background 0.3s ease',
+                          }}
+                          onMouseEnter={() => setHoveredChannelId(channel.id)}
+                          onMouseLeave={() => setHoveredChannelId(null)}
+                        />
+                      );
+                    })}
+
+                    {/* Current neuron rectangle */}
+                    <div
+                      className="absolute flex w-full flex-col overflow-hidden rounded-md border border-sky-700 bg-slate-50"
+                      style={{
+                        left: `${rectLeft}px`,
+                        top: `${rectTop}px`,
+                        width: `${rectWidth}px`,
+                        height: `${currentNeuronRectHeight}px`,
+                      }}
+                    >
+                      {/* Header text: Current [layer]@[index] - full width for background */}
+                      <div className="mb-1 flex w-full items-center justify-center bg-sky-700 py-2 pt-2 text-center font-mono text-[10px] font-bold uppercase leading-none text-white">
+                        {currentNeuron?.layer} - Index {currentNeuronData.index}
                       </div>
-                    ))}
-                    <Tooltip.Arrow className="fill-slate-200" />
-                  </Tooltip.Content>
-                </Tooltip.Portal>
-              </Tooltip.Root>
-            </Tooltip.Provider>
-          );
-        })}
+
+                      <div className="flex flex-col gap-x-2 text-[10px] font-bold">
+                        <div className="flex flex-row items-center gap-x-2 px-2">
+                          <span className="text-emerald-600">
+                            {getNeuronExplanation(currentNeuronData.layer, currentNeuronData.index, 'top')}
+                          </span>
+                        </div>
+                        <div className="flex flex-row items-center gap-x-2 px-2">
+                          <span className="text-rose-500">
+                            {getNeuronExplanation(currentNeuronData.layer, currentNeuronData.index, 'bottom')}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Arrows/fades below rectangle for each channel */}
+                    {resChannels.map((channel, idx) => {
+                      const channelX = channelStartX + idx * 36 + 2.5; // Center of 5px line
+                      const isOutputChannel = uniqueOutputChannels.includes(channel.index);
+
+                      // Check if nothing is hovered
+                      const nothingHovered = hoveredChannelId === null && hoveredNeuronIndex === null;
+
+                      // Hover detection - simplified (no layer-specific hover)
+                      const isConnectedToHoveredNeuron = hoveredNeuronIndex
+                        ? connectedNeurons
+                            .find((n) => n.index === hoveredNeuronIndex)
+                            ?.resChannels.some((c) => c.id === channel.id)
+                        : false;
+                      const isChannelHovered = hoveredChannelId === channel.id;
+                      // Full highlight if: channel hovered, connected neuron hovered, OR nothing hovered and this is an OUTPUT channel
+                      const isFullHighlight =
+                        isChannelHovered || isConnectedToHoveredNeuron || (nothingHovered && isOutputChannel);
+
+                      // Colors
+                      const defaultColor = 'rgba(3, 105, 161, 0.3)';
+                      const fullColor = '#0369a1';
+
+                      const fillColor = isFullHighlight ? fullColor : defaultColor;
+
+                      // Position below the rectangle
+                      const belowRectTop = rectTop + currentNeuronRectHeight;
+
+                      if (isOutputChannel) {
+                        // Draw funnel shape pointing down for output channels
+                        // Starts wide (13px) at top, narrows to channel width (5px) at bottom
+                        const arrowHeadHeight = 5;
+
+                        return (
+                          <svg
+                            key={`arrow-output-${channel.id}`}
+                            className="absolute cursor-pointer"
+                            style={{
+                              left: `${channelX - 6.5}px`,
+                              top: `${belowRectTop}px`,
+                              width: '13px',
+                              height: `${arrowAreaHeight}px`,
+                            }}
+                            viewBox={`0 0 13 ${arrowAreaHeight}`}
+                            onMouseEnter={() => setHoveredChannelId(channel.id)}
+                            onMouseLeave={() => setHoveredChannelId(null)}
+                          >
+                            {/* Funnel shape: wide at top, narrows to channel width */}
+                            <path
+                              d={`M0 0 L13 0 L9 ${arrowHeadHeight} L9 ${arrowAreaHeight} L4 ${arrowAreaHeight} L4 ${arrowHeadHeight} Z`}
+                              fill={fillColor}
+                              style={{ transition: 'fill 0.3s ease' }}
+                            />
+                          </svg>
+                        );
+                      }
+
+                      // Don't draw fades below rectangle if there are no forward trace neurons
+                      if (uniqueOutputChannels.length === 0) {
+                        return null;
+                      }
+
+                      // Draw fade from white for non-output channels
+                      const fadeBackground = isFullHighlight
+                        ? `linear-gradient(to bottom, #ffffff 15%, ${fullColor} 100%)`
+                        : `linear-gradient(to bottom, #ffffff 15%, ${defaultColor} 100%)`;
+
+                      return (
+                        <div
+                          key={`fade-below-${channel.id}`}
+                          className="absolute cursor-pointer"
+                          style={{
+                            left: `${channelX - 2.5}px`,
+                            top: `${belowRectTop}px`,
+                            width: '5px',
+                            height: `${arrowAreaHeight}px`,
+                            background: fadeBackground,
+                            transition: 'background 0.3s ease',
+                          }}
+                          onMouseEnter={() => setHoveredChannelId(channel.id)}
+                          onMouseLeave={() => setHoveredChannelId(null)}
+                        />
+                      );
+                    })}
+                  </>
+                );
+              })()}
+
+              {/* Render non-current neurons as circles with explanation labels */}
+              {connectedNeurons
+                .filter((neuron) => !neuron.current)
+                .map((neuron) => {
+                  const position = neuronPositions.get(neuron.index);
+                  if (!position) return null;
+
+                  // Check if this neuron is active (hovered or connected to hovered channel)
+                  const isConnectedToHoveredChannel = hoveredChannelId
+                    ? neuron.resChannels.some((c) => c.id === hoveredChannelId)
+                    : false;
+                  const isActive = hoveredNeuronIndex === neuron.index || isConnectedToHoveredChannel;
+
+                  // Determine background and border colors
+                  const bgColor = isActive ? 'bg-slate-500' : 'bg-slate-300';
+                  const borderColor = isActive ? 'border-slate-600' : 'border-slate-400';
+
+                  // Get explanation for this neuron
+                  const explanation = getNeuronExplanation(neuron.layer, neuron.index, undefined);
+                  const isBackward = neuron.direction === 'backward';
+
+                  return (
+                    <div key={neuron.index}>
+                      {/* Explanation label */}
+                      {explanation && (
+                        <div
+                          className="absolute max-w-[80px] truncate text-[8px] leading-3 text-slate-500"
+                          style={{
+                            top: `${position.top}px`,
+                            ...(isBackward
+                              ? {
+                                  right: `calc(100% - ${position.left}px + 4px)`,
+                                  textAlign: 'right',
+                                }
+                              : {
+                                  left: `${position.left + 16}px`,
+                                  textAlign: 'left',
+                                }),
+                          }}
+                          title={explanation}
+                        >
+                          {explanation}
+                        </div>
+                      )}
+                      {/* Neuron circle with tooltip */}
+                      <Tooltip.Provider delayDuration={0} skipDelayDuration={0}>
+                        <Tooltip.Root>
+                          <Tooltip.Trigger asChild>
+                            <div
+                              className={`absolute h-3 w-3 cursor-pointer rounded-full border transition-colors ${bgColor} ${borderColor}`}
+                              style={{
+                                left: `${position.left}px`,
+                                top: `${position.top}px`,
+                              }}
+                              onMouseEnter={() => setHoveredNeuronIndex(neuron.index)}
+                              onMouseLeave={() => setHoveredNeuronIndex(null)}
+                            />
+                          </Tooltip.Trigger>
+                          <Tooltip.Portal>
+                            <Tooltip.Content
+                              className="rounded bg-slate-200 px-5 py-3 text-xs text-slate-600"
+                              sideOffset={3}
+                              side="right"
+                            >
+                              <div className="font-mono text-sm font-bold">
+                                Layer {neuron.layer} #{neuron.index}
+                              </div>
+                              <div className="mb-3 text-[9px] font-bold uppercase text-slate-500">
+                                {neuron.direction === 'forward' ? 'Downstream' : 'Upstream'} Neuron
+                              </div>
+                              {explanation && (
+                                <div className="mb-3 text-[10px] italic text-slate-600">&quot;{explanation}&quot;</div>
+                              )}
+                              <div className="mb-1">
+                                <span className="font-semibold">Resid Stream Channels</span>
+                              </div>
+                              {neuron.resChannels.map((channel) => (
+                                <div key={channel.id} className="mb-1">
+                                  • {channel.id}
+                                </div>
+                              ))}
+                              <Tooltip.Arrow className="fill-slate-200" />
+                            </Tooltip.Content>
+                          </Tooltip.Portal>
+                        </Tooltip.Root>
+                      </Tooltip.Provider>
+                    </div>
+                  );
+                })}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

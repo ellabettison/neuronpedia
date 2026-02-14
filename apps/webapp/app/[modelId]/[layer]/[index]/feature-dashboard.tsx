@@ -29,6 +29,8 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import BookmarkButton from './bookmark-button';
 
+const MODEL_HAS_CONNECTED_NEURONS = ['circuitgpt-python'];
+
 export default function FeatureDashboard({
   initialNeuron,
   embed = false,
@@ -245,11 +247,13 @@ export default function FeatureDashboard({
               : 'mb-3 flex flex-col sm:mb-0 sm:basis-1/2 sm:overflow-auto sm:overflow-y-scroll lg:basis-1/3'
           }`}
         >
+          {/* === CONNECTED NEURONS */}
+          {MODEL_HAS_CONNECTED_NEURONS.includes(currentNeuron?.modelId || '') && (
+            <ConnectedNeuronsPane currentNeuron={currentNeuron} />
+          )}
+
           {/* === EXPLANATIONS */}
           <ExplanationsPane currentNeuron={currentNeuron} setCurrentNeuron={setCurrentNeuron} />
-
-          {/* === CONNECTED NEURONS */}
-          <ConnectedNeuronsPane currentNeuron={currentNeuron} />
 
           {/* === COS SIM */}
           <CosSimPane currentNeuron={currentNeuron} />
