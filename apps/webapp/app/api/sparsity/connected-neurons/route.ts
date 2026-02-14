@@ -1,5 +1,5 @@
 import { prisma } from '@/lib/db';
-import { SPARSITY_SERVER_SECRET, SPARSITY_SERVER_URL, USE_LOCALHOST_SPARSITY } from '@/lib/env';
+import { SPARSITY_SERVER, SPARSITY_SERVER_SECRET, USE_LOCALHOST_SPARSITY } from '@/lib/env';
 import { RequestOptionalUser, withOptionalUser } from '@/lib/with-user';
 import { NextResponse } from 'next/server';
 
@@ -300,7 +300,7 @@ export const GET = withOptionalUser(async (request: RequestOptionalUser) => {
 
   try {
     // Build the sparsity server URL
-    const sparsityUrl = USE_LOCALHOST_SPARSITY ? 'http://localhost:8000' : SPARSITY_SERVER_URL;
+    const sparsityUrl = USE_LOCALHOST_SPARSITY ? 'http://localhost:5005' : SPARSITY_SERVER;
 
     // Fetch connected neurons from sparsity server
     const headers: HeadersInit = {};
@@ -323,11 +323,8 @@ export const GET = withOptionalUser(async (request: RequestOptionalUser) => {
 
     const sparsityData: SparsityResponse = await sparsityResponse.json();
 
-    console.log('sparsityData', JSON.stringify(sparsityData, null, 2));
-
     // Extract all neurons from trace data
     const allNeurons = extractAllNeurons(sparsityData.trace_forward, sparsityData.trace_backward);
-    console.log('allNeurons', JSON.stringify(allNeurons, null, 2));
     allNeurons.push({ layer, neuron: index });
 
     // Extract all resid channels with their layers
@@ -351,9 +348,7 @@ export const GET = withOptionalUser(async (request: RequestOptionalUser) => {
     // Combine all features and fetch explanations in a single query
     const allFeatures = [...neuronFeatures, ...residFeatures];
 
-    console.log('allFeatures', JSON.stringify(allFeatures, null, 2));
     const explanationsMap = await getBulkTopExplanations(modelId, allFeatures);
-    console.log('explanationsMap', JSON.stringify(Array.from(explanationsMap.entries()), null, 2));
 
     // Map results back to neuron explanations
     const neuronExplanations: NeuronExplanation[] = neuronFeatures.map((f) => ({
@@ -379,8 +374,6 @@ export const GET = withOptionalUser(async (request: RequestOptionalUser) => {
       neuronExplanations,
       residChannelExplanations,
     };
-
-    console.log('response', JSON.stringify(response, null, 2));
 
     return NextResponse.json(response);
   } catch (error) {

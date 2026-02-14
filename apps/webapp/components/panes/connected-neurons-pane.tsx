@@ -1,6 +1,8 @@
 import { NeuronWithPartialRelations } from '@/prisma/generated/zod';
 import * as Tooltip from '@radix-ui/react-tooltip';
-import { HelpCircle } from 'lucide-react';
+import { ExternalLinkIcon, HelpCircle } from 'lucide-react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LoadingSquare } from '../svg/loading-square';
 
@@ -399,6 +401,7 @@ export default function ConnectedNeuronsPane({
 }: {
   currentNeuron: NeuronWithPartialRelations | undefined;
 }) {
+  const router = useRouter();
   const [hoveredNeuronIndex, setHoveredNeuronIndex] = useState<string | null>(null);
   const [hoveredChannelId, setHoveredChannelId] = useState<string | null>(null);
 
@@ -472,6 +475,14 @@ export default function ConnectedNeuronsPane({
         resChannels,
       )
     : [];
+
+  const getAllNeuronExplanations = (layer: number, neuronIndex: string): { id: string; description: string }[] => {
+    if (!sparsityData?.neuronExplanations) return [];
+    const neuronLayer = `${layer}-mlp`;
+    return sparsityData.neuronExplanations
+      .filter((e) => e.layer === neuronLayer && e.index === neuronIndex)
+      .flatMap((e) => e.explanations);
+  };
 
   // Helper function to get the first explanation for a neuron
   const getNeuronExplanation = (
@@ -554,7 +565,7 @@ export default function ConnectedNeuronsPane({
   // Calculate absolute positions within the inner container
   const channelStartX = innerContentCenter - visualChannelWidth / 2;
   // Left neurons: same distance from leftmost channel as right neurons from rightmost channel
-  const backwardNeuronsBaseLeft = channelStartX - gapBetweenNeuronsAndChannels - 24;
+  const backwardNeuronsBaseLeft = channelStartX - gapBetweenNeuronsAndChannels - 8;
   const forwardNeuronsBaseLeft = channelStartX + visualChannelWidth + gapBetweenNeuronsAndChannels + 5;
 
   // Compute neuron positions grouped by layer
@@ -669,13 +680,13 @@ export default function ConnectedNeuronsPane({
                 key={`layer-label-${layer}`}
                 className="absolute text-[10px] font-medium text-slate-400"
                 style={{
-                  left: '8px',
+                  left: '-4px',
                   top: `${centerY}px`,
                   transform: 'translateY(-50%)',
                   whiteSpace: 'nowrap',
                 }}
               >
-                Layer {layer}
+                L{layer}
               </div>
             ))}
 
@@ -751,7 +762,7 @@ export default function ConnectedNeuronsPane({
                         const markerStartId = `arrow-start-${neuron.index}-${channel.id}`;
 
                         const channelArrowOffset = isOutputLine ? -6 : 0;
-                        const adjustedNeuronX = neuronEdgeX - 2;
+                        const adjustedNeuronX = isBackward ? neuronEdgeX - 3 : neuronEdgeX - 2;
                         const adjustedChannelX = channelLeft + 2 + channelArrowOffset;
 
                         return (
@@ -997,45 +1008,39 @@ export default function ConnectedNeuronsPane({
                             </Tooltip.Trigger>
                             <Tooltip.Portal>
                               <Tooltip.Content
-                                className="min-w-[240px] max-w-[240px] rounded border border-slate-200 bg-white px-5 py-3 text-xs text-slate-600 shadow-md"
+                                className="min-w-[240px] max-w-[240px] rounded-md border border-slate-300 bg-white px-3 py-3 text-xs text-slate-600 shadow-md"
                                 sideOffset={3}
                                 side={isOutputChannel && !isInputChannel ? 'left' : 'right'}
                                 align="center"
                                 avoidCollisions={false}
                               >
-                                <div className="font-mono text-sm font-bold">Channel {channel.index}</div>
-                                {/* All layer explanations */}
-                                {allExplanations.length > 0 && (
-                                  <div className="mt-2">
-                                    <div className="mb-1 font-semibold">Explanations:</div>
-                                    {allExplanations.map((layerData) => (
-                                      <div key={layerData.layer} className="mb-2">
-                                        <div className="text-[10px] font-medium uppercase text-slate-400">
-                                          {layerData.layer}
-                                        </div>
-                                        {layerData.explanations.map((exp, idx) => (
-                                          <div key={exp.id} className="ml-2 text-[10px] italic text-slate-500">
-                                            {idx + 1}. &ldquo;{exp.description}&rdquo;
-                                          </div>
-                                        ))}
-                                      </div>
-                                    ))}
-                                  </div>
-                                )}
+                                <div className="text-xs font-bold">Residual Channel {channel.index}</div>
+
                                 {/* Writers: backward neurons + current if it outputs to this channel */}
-                                <div className="mt-2 font-semibold">Writers (→ channel):</div>
+                                <div className="mt-2 text-[10px] font-semibold">Neurons Writing</div>
                                 {(sparsityData?.trace_backward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
                                   .map((n) => (
-                                    <div key={`writer-${n.neuron}`} className="ml-2">
-                                      Layer {n.layer} #{n.neuron}{' '}
+                                    <div key={`writer-${n.neuron}`} className="ml-2 text-[10px] font-medium">
+                                      <Link
+                                        href={`/${currentNeuron?.modelId}/${n.layer}-mlp/${n.neuron}`}
+                                        className="font-mono text-sky-700 hover:underline"
+                                      >
+                                        {n.layer}-MLP @ {n.neuron}
+                                      </Link>{' '}
                                       <span className="text-slate-400">(w: {n.write_weight.toFixed(3)})</span>
                                     </div>
                                   ))}
                                 {outputChannelIds.has(channel.id) && sparsityData && (
-                                  <div className="ml-2 font-medium text-sky-700">
-                                    Layer {sparsityData.layer} #{sparsityData.neuron} (current){' '}
-                                    <span className="font-normal text-sky-500">
+                                  <div className="ml-2 text-[10px] font-medium">
+                                    <Link
+                                      href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
+                                      className="font-mono text-sky-700 hover:underline"
+                                    >
+                                      {sparsityData.layer}-MLP @ {sparsityData.neuron}
+                                    </Link>{' '}
+                                    <span className="text-slate-400">(current)</span>{' '}
+                                    <span className="text-slate-400">
                                       (w:{' '}
                                       {sparsityData.trace_forward
                                         .find((n) => n.via_channel === channel.index)
@@ -1045,11 +1050,17 @@ export default function ConnectedNeuronsPane({
                                   </div>
                                 )}
                                 {/* Readers: forward neurons + current if it inputs from this channel */}
-                                <div className="mt-2 font-semibold">Readers (channel →):</div>
+                                <div className="mt-2 text-[10px] font-semibold">Neurons Reading</div>
                                 {inputChannelIds.has(channel.id) && sparsityData && (
-                                  <div className="ml-2 font-medium text-sky-700">
-                                    Layer {sparsityData.layer} #{sparsityData.neuron} (current){' '}
-                                    <span className="font-normal text-sky-500">
+                                  <div className="ml-2 text-[10px] font-medium">
+                                    <Link
+                                      href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
+                                      className="font-mono text-sky-700 hover:underline"
+                                    >
+                                      {sparsityData.layer}-MLP @ {sparsityData.neuron}
+                                    </Link>{' '}
+                                    <span className="text-slate-400">(current)</span>{' '}
+                                    <span className="text-slate-400">
                                       (r:{' '}
                                       {sparsityData.trace_backward
                                         .find((n) => n.via_channel === channel.index)
@@ -1061,12 +1072,58 @@ export default function ConnectedNeuronsPane({
                                 {(sparsityData?.trace_forward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
                                   .map((n) => (
-                                    <div key={`reader-${n.neuron}`} className="ml-2">
-                                      Layer {n.layer} #{n.neuron}{' '}
+                                    <div key={`reader-${n.neuron}`} className="ml-2 text-[10px] font-medium">
+                                      <Link
+                                        href={`/${currentNeuron?.modelId}/${n.layer}-mlp/${n.neuron}`}
+                                        className="font-mono text-sky-700 hover:underline"
+                                      >
+                                        {n.layer}-MLP @ {n.neuron}
+                                      </Link>{' '}
                                       <span className="text-slate-400">(r: {n.read_weight.toFixed(3)})</span>
                                     </div>
                                   ))}
-                                <Tooltip.Arrow className="fill-slate-200" />
+                                {/* All layer explanations */}
+                                {allExplanations.length > 0 && (
+                                  <div className="mt-2">
+                                    <div className="mb-0.5 text-[10px] font-semibold">Resid Explanations</div>
+                                    {allExplanations.map((layerData) => (
+                                      <div key={layerData.layer} className="mb-1 ml-2">
+                                        <div className="text-[10px] font-medium uppercase text-slate-400">
+                                          {/* Layer {layerData.layer.split('-')[0]}
+                                          {' - '} */}
+                                          <Link
+                                            href={`/${currentNeuron?.modelId}/${layerData.layer}/${channel.index}`}
+                                            className="font-mono text-sky-700 hover:underline"
+                                          >
+                                            {layerData.layer} @ {channel.index}
+                                          </Link>
+                                        </div>
+                                        {layerData.explanations
+                                          .sort((a, b) => {
+                                            const aIsBottom = a.description.includes('(negative activations)');
+                                            const bIsBottom = b.description.includes('(negative activations)');
+                                            return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                          })
+                                          .map((exp) => {
+                                            const isBottomActivation =
+                                              exp.description.includes('(negative activations)');
+                                            const colorClass = isBottomActivation
+                                              ? 'text-rose-500'
+                                              : 'text-emerald-600';
+                                            return (
+                                              <div
+                                                key={exp.id}
+                                                className={`mb-0.5 ml-3 text-[10px] font-medium leading-snug ${colorClass}`}
+                                              >
+                                                {exp.description.replace(' (negative activations)', '')}
+                                              </div>
+                                            );
+                                          })}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                <Tooltip.Arrow className="fill-slate-300" />
                               </Tooltip.Content>
                             </Tooltip.Portal>
                           </Tooltip.Root>
@@ -1076,22 +1133,22 @@ export default function ConnectedNeuronsPane({
                     {/* Fade out at bottom */}
                     {(() => {
                       const isChannelHovered = hoveredChannelId === channel.id;
-                      // Check if this channel is an output channel (for bottom fade, only output channels should be highlighted by default)
+                      // Check if this channel is an input or output channel
                       const isOutputChan =
                         sparsityData?.trace_forward.some((n) => n.via_channel === channel.index) ?? false;
+                      const isInputChan =
+                        sparsityData?.trace_backward.some((n) => n.via_channel === channel.index) ?? false;
                       // Check if nothing is hovered
                       const nothingHovered = hoveredChannelId === null && hoveredNeuronIndex === null;
 
                       // Channel color - light blue by default, turns solid blue when highlighted
-                      let channelColor: string;
+                      const fullColor = '#0369a1';
+                      const defaultColorSolid = '#b3d2e3';
 
-                      if (isConnectedToHoveredNeuron || isChannelHovered || (nothingHovered && isOutputChan)) {
-                        // Full opacity when hovered, connected to hovered neuron, or nothing hovered and this is an OUTPUT channel
-                        channelColor = '#0369a1';
-                      } else {
-                        // Default - light blue
-                        channelColor = 'rgba(3, 105, 161, 0.3)';
-                      }
+                      const isFullHighlight =
+                        isConnectedToHoveredNeuron ||
+                        isChannelHovered ||
+                        (nothingHovered && (isInputChan || isOutputChan));
 
                       const fadeHeight = 16;
 
@@ -1103,7 +1160,9 @@ export default function ConnectedNeuronsPane({
                             left: '0px',
                             width: '5px',
                             height: `${fadeHeight}px`,
-                            background: `linear-gradient(to bottom, ${channelColor} 0%, #ffffff 100%)`,
+                            background: isFullHighlight
+                              ? `linear-gradient(to bottom, ${fullColor} 0%, ${fullColor} 20%, #ffffff 100%)`
+                              : `linear-gradient(to bottom, ${defaultColorSolid} 0%, ${defaultColorSolid} 20%, #ffffff 100%)`,
                             transition: 'background 0.3s ease',
                           }}
                         />
@@ -1140,7 +1199,7 @@ export default function ConnectedNeuronsPane({
                 // Add extra width on each side (as if edge channels are wider)
                 const edgeChannelExtraWidth = 20;
                 const rectPadding = 30;
-                const rectWidth = visualChannelWidth + edgeChannelExtraWidth * 2 + rectPadding * 2;
+                const rectWidth = Math.max(visualChannelWidth + edgeChannelExtraWidth * 2 + rectPadding * 2, 250);
                 // Center the rectangle over the visual channel span
                 // Visual center of channels = channelStartX + visualChannelWidth / 2
                 const visualCenter = channelStartX + visualChannelWidth / 2;
@@ -1177,9 +1236,12 @@ export default function ConnectedNeuronsPane({
                             ?.resChannels.some((c) => c.id === channel.id)
                         : false;
                       const isChannelHovered = hoveredChannelId === channel.id;
-                      // Full highlight if: channel hovered, connected neuron hovered, OR nothing hovered and this is an INPUT channel
+                      const isOutputChannel = uniqueOutputChannels.includes(channel.index);
+                      // Full highlight if: channel hovered, connected neuron hovered, OR nothing hovered and this is an INPUT or OUTPUT channel
                       const isFullHighlight =
-                        isChannelHovered || isConnectedToHoveredNeuron || (nothingHovered && isInputChannel);
+                        isChannelHovered ||
+                        isConnectedToHoveredNeuron ||
+                        (nothingHovered && (isInputChannel || isOutputChannel));
 
                       // Colors
                       const defaultColor = 'rgba(3, 105, 161, 0.3)';
@@ -1232,9 +1294,11 @@ export default function ConnectedNeuronsPane({
                       }
 
                       // Draw fade to white for non-input channels (covers the channel line)
+                      // For default state, use solid color equivalent of rgba(3, 105, 161, 0.3) on white for smooth gradient
+                      const defaultColorSolid = '#b3d2e3';
                       const fadeBackground = isFullHighlight
-                        ? `linear-gradient(to bottom, ${fullColor} 0%, #ffffff 85%)`
-                        : `linear-gradient(to bottom, ${defaultColor} 0%, #ffffff 85%)`;
+                        ? `linear-gradient(to bottom, ${fullColor} 0%, #ffffff 90%)`
+                        : `linear-gradient(to bottom, ${defaultColorSolid} 0%, #ffffff 90%)`;
 
                       return (
                         <div
@@ -1298,13 +1362,18 @@ export default function ConnectedNeuronsPane({
                             ?.resChannels.some((c) => c.id === channel.id)
                         : false;
                       const isChannelHovered = hoveredChannelId === channel.id;
-                      // Full highlight if: channel hovered, connected neuron hovered, OR nothing hovered and this is an OUTPUT channel
+                      const isInputChannel = uniqueInputChannels.includes(channel.index);
+                      // Full highlight if: channel hovered, connected neuron hovered, OR nothing hovered and this is an INPUT or OUTPUT channel
                       const isFullHighlight =
-                        isChannelHovered || isConnectedToHoveredNeuron || (nothingHovered && isOutputChannel);
+                        isChannelHovered ||
+                        isConnectedToHoveredNeuron ||
+                        (nothingHovered && (isInputChannel || isOutputChannel));
 
                       // Colors
                       const defaultColor = 'rgba(3, 105, 161, 0.3)';
                       const fullColor = '#0369a1';
+                      // Solid color equivalent of rgba(3, 105, 161, 0.3) on white for smooth gradient
+                      const defaultColorSolid = '#b3d2e3';
 
                       const fillColor = isFullHighlight ? fullColor : defaultColor;
 
@@ -1348,7 +1417,7 @@ export default function ConnectedNeuronsPane({
                       // Draw fade from white for non-output channels
                       const fadeBackground = isFullHighlight
                         ? `linear-gradient(to bottom, #ffffff 15%, ${fullColor} 100%)`
-                        : `linear-gradient(to bottom, #ffffff 15%, ${defaultColor} 100%)`;
+                        : `linear-gradient(to bottom, #ffffff 15%, ${defaultColorSolid} 100%)`;
 
                       return (
                         <div
@@ -1389,7 +1458,8 @@ export default function ConnectedNeuronsPane({
                   const borderColor = isActive ? 'border-slate-600' : 'border-slate-400';
 
                   // Get explanation for this neuron
-                  const explanation = getNeuronExplanation(neuron.layer, neuron.index, undefined);
+                  const allExplanations = getAllNeuronExplanations(neuron.layer, neuron.index);
+                  const explanation = allExplanations.length > 0 ? allExplanations[0].description : null;
                   const isBackward = neuron.direction === 'backward';
 
                   return (
@@ -1397,7 +1467,7 @@ export default function ConnectedNeuronsPane({
                       {/* Explanation label */}
                       {explanation && (
                         <div
-                          className="absolute max-w-[80px] truncate text-[8px] leading-3 text-slate-500"
+                          className="absolute max-w-[120px] truncate text-[8px] leading-3 text-slate-500"
                           style={{
                             top: `${position.top}px`,
                             ...(isBackward
@@ -1420,10 +1490,22 @@ export default function ConnectedNeuronsPane({
                         <Tooltip.Root>
                           <Tooltip.Trigger asChild>
                             <div
+                              role="button"
+                              tabIndex={0}
+                              aria-label={`Go to neuron ${neuron.layer}-MLP @ ${neuron.index}`}
                               className={`absolute h-3 w-3 cursor-pointer rounded-full border transition-colors ${bgColor} ${borderColor}`}
                               style={{
                                 left: `${position.left}px`,
                                 top: `${position.top}px`,
+                              }}
+                              onClick={() =>
+                                router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`)
+                              }
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`);
+                                }
                               }}
                               onMouseEnter={() => setHoveredNeuronIndex(neuron.index)}
                               onMouseLeave={() => setHoveredNeuronIndex(null)}
@@ -1431,25 +1513,56 @@ export default function ConnectedNeuronsPane({
                           </Tooltip.Trigger>
                           <Tooltip.Portal>
                             <Tooltip.Content
-                              className="rounded bg-slate-200 px-5 py-3 text-xs text-slate-600"
+                              className="min-w-[150px] max-w-[150px] rounded-md border border-slate-300 bg-white px-3 py-3 text-xs text-slate-600 shadow-md"
                               sideOffset={3}
-                              side="right"
+                              side={neuron.direction === 'backward' ? 'left' : 'right'}
                             >
-                              <div className="font-mono text-sm font-bold">
-                                Layer {neuron.layer} #{neuron.index}
-                              </div>
-                              <div className="mb-3 text-[9px] font-bold uppercase text-slate-500">
-                                {neuron.direction === 'forward' ? 'Downstream' : 'Upstream'} Neuron
-                              </div>
-                              {explanation && (
-                                <div className="mb-3 text-[10px] italic text-slate-600">&quot;{explanation}&quot;</div>
+                              <Link
+                                href={`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`}
+                                className="flex flex-row items-center gap-x-1 font-mono text-xs font-bold uppercase text-sky-700 hover:underline"
+                              >
+                                {neuron.layer}-MLP @ {neuron.index} <ExternalLinkIcon className="h-3 w-3" />
+                              </Link>
+                              {allExplanations.length > 0 && (
+                                <div className="mb-0 mt-3 text-[9px] font-bold uppercase text-slate-500">
+                                  Explanation Labels
+                                </div>
                               )}
-                              <div className="mb-1">
-                                <span className="font-semibold">Resid Stream Channels</span>
+                              {allExplanations.length > 0 && (
+                                <div className="mb-3 ml-2">
+                                  {allExplanations
+                                    .sort((a, b) => {
+                                      const aIsBottom = a.description.includes('(negative activations)');
+                                      const bIsBottom = b.description.includes('(negative activations)');
+                                      return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                    })
+                                    .map((exp) => {
+                                      const isBottomActivation = exp.description.includes('(negative activations)');
+                                      const colorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                                      return (
+                                        <div
+                                          key={exp.id}
+                                          className={`mb-0.5 text-[10px] font-medium leading-snug ${colorClass}`}
+                                        >
+                                          {exp.description.replace(' (negative activations)', '')}
+                                        </div>
+                                      );
+                                    })}
+                                </div>
+                              )}
+                              <div className="mb-0 mt-2">
+                                <span className="text-[9px] font-bold uppercase text-slate-500">
+                                  {neuron.direction !== 'backward' ? 'Reads From' : 'Writes To'}
+                                </span>
                               </div>
                               {neuron.resChannels.map((channel) => (
-                                <div key={channel.id} className="mb-1">
-                                  • {channel.id}
+                                <div key={channel.id} className="mb-1 font-mono text-[10px] font-medium">
+                                  <Link
+                                    href={`/${currentNeuron?.modelId}/${neuron.layer}-resid/${channel.index}`}
+                                    className="ml-2 uppercase text-sky-700 hover:underline"
+                                  >
+                                    {neuron.layer}-resid @ {channel.index}
+                                  </Link>
                                 </div>
                               ))}
                               <Tooltip.Arrow className="fill-slate-200" />

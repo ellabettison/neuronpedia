@@ -119,7 +119,7 @@ export const GRAPH_SERVER_SECRET = process.env.GRAPH_SERVER_SECRET || '';
 
 // Sparsity Server
 export const USE_LOCALHOST_SPARSITY = process.env.USE_LOCALHOST_SPARSITY === 'true';
-export const SPARSITY_SERVER_URL = process.env.SPARSITY_SERVER_URL || 'http://localhost:5005';
+export const SPARSITY_SERVER = process.env.SPARSITY_SERVER || 'http://localhost:5005';
 export const SPARSITY_SERVER_SECRET = process.env.SPARSITY_SERVER_SECRET || '';
 
 // Runpod Graph

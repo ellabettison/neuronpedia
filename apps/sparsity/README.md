@@ -11,7 +11,7 @@ uv sync
 ## Run
 
 ```bash
-uv run uvicorn server:app --reload
+uv run uvicorn server:app --port 5005 --host 0.0.0.0 --reload
 ```
 
 Optional: set `SECRET` in `.env` to require `X-SECRET-KEY` header.

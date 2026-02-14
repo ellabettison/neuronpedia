@@ -248,9 +248,8 @@ export default function FeatureDashboard({
           }`}
         >
           {/* === CONNECTED NEURONS */}
-          {MODEL_HAS_CONNECTED_NEURONS.includes(currentNeuron?.modelId || '') && (
-            <ConnectedNeuronsPane currentNeuron={currentNeuron} />
-          )}
+          {MODEL_HAS_CONNECTED_NEURONS.includes(currentNeuron?.modelId || '') &&
+            currentNeuron?.layer.includes('mlp') && <ConnectedNeuronsPane currentNeuron={currentNeuron} />}
 
           {/* === EXPLANATIONS */}
           <ExplanationsPane currentNeuron={currentNeuron} setCurrentNeuron={setCurrentNeuron} />
