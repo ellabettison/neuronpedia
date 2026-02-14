@@ -1,10 +1,11 @@
+/* eslint-disable import/no-cycle */
+
 import FeatureDashboard from '@/app/[modelId]/[layer]/[index]/feature-dashboard';
-import { NeuronWithPartialRelations } from '@/prisma/generated/zod';
 import { HoverCard, HoverCardContent, HoverCardTrigger } from '@/components/shadcn/hover-card';
+import { NeuronWithPartialRelations } from '@/prisma/generated/zod';
 import * as Tooltip from '@radix-ui/react-tooltip';
 import { ExternalLinkIcon, HelpCircle } from 'lucide-react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import { LoadingSquare } from '../svg/loading-square';
 
@@ -403,7 +404,6 @@ export default function ConnectedNeuronsPane({
 }: {
   currentNeuron: NeuronWithPartialRelations | undefined;
 }) {
-  const router = useRouter();
   const [hoveredNeuronIndex, setHoveredNeuronIndex] = useState<string | null>(null);
   const [hoveredChannelId, setHoveredChannelId] = useState<string | null>(null);
   const [hoveredFeature, setHoveredFeature] = useState<NeuronWithPartialRelations | undefined>();
@@ -1491,23 +1491,13 @@ export default function ConnectedNeuronsPane({
                       {/* Neuron circle with hover card showing feature dashboard */}
                       <HoverCard openDelay={300} closeDelay={400}>
                         <HoverCardTrigger asChild>
-                          <div
-                            role="button"
-                            tabIndex={0}
+                          <Link
+                            href={`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`}
                             aria-label={`Go to neuron ${neuron.layer}-MLP @ ${neuron.index}`}
-                            className={`absolute h-3 w-3 cursor-pointer rounded-full border transition-colors ${bgColor} ${borderColor}`}
+                            className={`absolute block h-3 w-3 rounded-full border transition-colors ${bgColor} ${borderColor}`}
                             style={{
                               left: `${position.left}px`,
                               top: `${position.top}px`,
-                            }}
-                            onClick={() =>
-                              router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`)
-                            }
-                            onKeyDown={(e) => {
-                              if (e.key === 'Enter' || e.key === ' ') {
-                                e.preventDefault();
-                                router.push(`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`);
-                              }
                             }}
                             onMouseEnter={() => {
                               setHoveredNeuronIndex(neuron.index);
@@ -1522,13 +1512,10 @@ export default function ConnectedNeuronsPane({
                               }
                               // Reset and fetch new data
                               setHoveredFeature(undefined);
-                              fetch(
-                                `/api/feature/${currentNeuron?.modelId}/${neuronLayer}/${neuron.index}`,
-                                {
-                                  method: 'GET',
-                                  headers: { 'Content-Type': 'application/json' },
-                                },
-                              )
+                              fetch(`/api/feature/${currentNeuron?.modelId}/${neuronLayer}/${neuron.index}`, {
+                                method: 'GET',
+                                headers: { 'Content-Type': 'application/json' },
+                              })
                                 .then((response) => response.json())
                                 .then((n: NeuronWithPartialRelations) => {
                                   setHoveredFeature(n);
