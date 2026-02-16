@@ -391,17 +391,19 @@ export default function ActivationsList({
         ) : isConnectedNeuronsModel ? (
           // Two-column layout for connected neurons models
           <div className="flex flex-col gap-x-0 sm:flex-row">
-            {/* Left column: Top activations (highest to lowest) */}
-            <div className="flex-1 border-r border-slate-200">
+            {/* Right column: Bottom activations (lowest to highest) */}
+            <div className="flex-1">
               <div className="flex flex-row items-center gap-x-1 bg-slate-100 px-3 py-2 font-mono text-[10px] font-bold uppercase text-slate-600">
-                <div className="rounded-sm bg-emerald-400 px-1 py-[1px]">Positive</div> Activations
+                <div className="rounded-sm bg-rose-400 px-1 py-[1px]">Negative</div> Activations
               </div>
-              {topItems.length === 0 ? (
-                <div className="flex h-24 items-center justify-center text-sm text-slate-400">No top activations</div>
+              {bottomItems.length === 0 ? (
+                <div className="flex h-24 items-center justify-center text-sm text-slate-400">
+                  No bottom activations
+                </div>
               ) : (
-                topItems.map((activation, activationIndex) => (
+                bottomItems.map((activation, activationIndex) => (
                   <div
-                    key={`top-activation-${activation.id}`}
+                    key={`bottom-activation-${activation.id}`}
                     className={`relative border-slate-100 px-3 py-1 [&:not(:last-child)]:border-b ${
                       selectedRange > 0 && 'sm:py-2'
                     }`}
@@ -410,7 +412,7 @@ export default function ActivationsList({
                       <div className="flex w-full flex-auto flex-col text-left text-sm">
                         {activation.tokens && (
                           <ActivationItem
-                            key={`top-${ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size}-${activationIndex}${showLineBreaks}`}
+                            key={`bottom-${ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size}-${activationIndex}${showLineBreaks}`}
                             activation={activation}
                             tokensToDisplayAroundMaxActToken={
                               ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size
@@ -434,19 +436,17 @@ export default function ActivationsList({
                 ))
               )}
             </div>
-            {/* Right column: Bottom activations (lowest to highest) */}
-            <div className="flex-1">
+            {/* Left column: Top activations (highest to lowest) */}
+            <div className="flex-1 border-r border-slate-200">
               <div className="flex flex-row items-center gap-x-1 bg-slate-100 px-3 py-2 font-mono text-[10px] font-bold uppercase text-slate-600">
-                <div className="rounded-sm bg-rose-400 px-1 py-[1px]">Negative</div> Activations
+                <div className="rounded-sm bg-emerald-400 px-1 py-[1px]">Positive</div> Activations
               </div>
-              {bottomItems.length === 0 ? (
-                <div className="flex h-24 items-center justify-center text-sm text-slate-400">
-                  No bottom activations
-                </div>
+              {topItems.length === 0 ? (
+                <div className="flex h-24 items-center justify-center text-sm text-slate-400">No top activations</div>
               ) : (
-                bottomItems.map((activation, activationIndex) => (
+                topItems.map((activation, activationIndex) => (
                   <div
-                    key={`bottom-activation-${activation.id}`}
+                    key={`top-activation-${activation.id}`}
                     className={`relative border-slate-100 px-3 py-1 [&:not(:last-child)]:border-b ${
                       selectedRange > 0 && 'sm:py-2'
                     }`}
@@ -455,7 +455,7 @@ export default function ActivationsList({
                       <div className="flex w-full flex-auto flex-col text-left text-sm">
                         {activation.tokens && (
                           <ActivationItem
-                            key={`bottom-${ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size}-${activationIndex}${showLineBreaks}`}
+                            key={`top-${ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size}-${activationIndex}${showLineBreaks}`}
                             activation={activation}
                             tokensToDisplayAroundMaxActToken={
                               ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size

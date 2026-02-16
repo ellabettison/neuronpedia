@@ -61,7 +61,7 @@ export default async function Image({ params }: { params: { modelId: string; lay
   const maxLogitHist = Math.max(...currentNeuron.logits_hist_data_bar_heights.map((value) => Math.abs(value)));
   const logitColorRange = currentNeuron.logits_hist_data_bar_values.map((value) => {
     if (value >= 0) {
-      return '#0000ff';
+      return '#10b981';
     }
     return '#ff0000';
   });
@@ -198,23 +198,23 @@ export default async function Image({ params }: { params: { modelId: string; lay
                 return (
                   <div tw="flex flex-row min-w-[200px] justify-between items-center" key={i}>
                     {ratio > 0.9 ? (
-                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#2727ff] bg-opacity-50">
+                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#10b981] bg-opacity-50">
                         {replaceHtmlAnomalies(s)}
                       </pre>
                     ) : ratio > 0.75 ? (
-                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#2727ff] bg-opacity-30">
+                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#10b981] bg-opacity-30">
                         {replaceHtmlAnomalies(s)}
                       </pre>
                     ) : ratio > 0.5 ? (
-                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#2727ff] bg-opacity-20">
+                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#10b981] bg-opacity-20">
                         {replaceHtmlAnomalies(s)}
                       </pre>
                     ) : ratio > 0.25 ? (
-                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#2727ff] bg-opacity-10">
+                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#10b981] bg-opacity-10">
                         {replaceHtmlAnomalies(s)}
                       </pre>
                     ) : (
-                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#2727ff] bg-opacity-5">
+                      <pre tw="overflow-hidden max-w-[250px] rounded-md font-bold mr-5 my-[3px] px-2 py-1.5 bg-[#10b981] bg-opacity-5">
                         {replaceHtmlAnomalies(s)}
                       </pre>
                     )}

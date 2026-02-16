@@ -342,9 +342,9 @@ export default function FeatureStats({
                       <pre
                         style={{
                           backgroundColor: maxLogit
-                            ? `rgba(calc(255 * (1 - ${
+                            ? `rgba(calc(255 - 239 * ${
                                 Math.abs(currentNeuron?.pos_values[i]) / maxLogit
-                              })), calc(255 * (1 - ${Math.abs(currentNeuron?.pos_values[i]) / maxLogit})), 255, 0.5)`
+                              }), calc(255 - 70 * ${Math.abs(currentNeuron?.pos_values[i]) / maxLogit}), calc(255 - 126 * ${Math.abs(currentNeuron?.pos_values[i]) / maxLogit}), 0.5)`
                             : undefined,
                         }}
                         className="max-w-[80px] overflow-x-hidden rounded-sm font-bold sm:max-w-[100px] sm:rounded"
@@ -481,7 +481,7 @@ export default function FeatureStats({
                     type: 'bar',
                     mode: 'lines+markers',
                     name: '',
-                    marker: { color: 'rgba(128, 128, 250, 1.0)' },
+                    marker: { color: 'rgba(16, 185, 129, 1.0)' },
                   },
                   {
                     x: currentNeuron?.logits_hist_data_bar_values.filter((value) => value < 0),

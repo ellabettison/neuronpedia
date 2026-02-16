@@ -673,15 +673,14 @@ export default function ConnectedNeuronsPane({
           <>
             {/* <div>{debugData}</div> */}
 
-            {/* Layer labels - absolutely positioned on far left of pane */}
-            {layerLabelPositions.map(({ layer, centerY }) => (
+            {/* Layer labels - absolutely positioned on far left of pane, aligned to top of layer */}
+            {layerLabelPositions.map(({ layer, minY }) => (
               <div
                 key={`layer-label-${layer}`}
-                className="absolute text-[10px] font-medium text-slate-400"
+                className="absolute text-[9px] font-medium text-slate-400"
                 style={{
                   left: '-4px',
-                  top: `${centerY}px`,
-                  transform: 'translateY(-50%)',
+                  top: `${minY - 2}px`,
                   whiteSpace: 'nowrap',
                 }}
               >
@@ -1032,9 +1031,9 @@ export default function ConnectedNeuronsPane({
                                 <div className="text-xs font-bold">Residual Channel {channel.index}</div>
 
                                 {/* Writers: backward neurons that write to this channel */}
-                                {(sparsityData?.trace_backward ?? []).some(
-                                  (n) => n.via_channel === channel.index,
-                                ) && <div className="mt-2 text-[10px] font-semibold">Neurons Writing</div>}
+                                {(sparsityData?.trace_backward ?? []).some((n) => n.via_channel === channel.index) && (
+                                  <div className="mt-2 text-[10px] font-semibold">Neurons Writing</div>
+                                )}
                                 {(sparsityData?.trace_backward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
                                   .map((n) => {
@@ -1079,9 +1078,9 @@ export default function ConnectedNeuronsPane({
                                     );
                                   })}
                                 {/* Readers: forward neurons that read from this channel */}
-                                {(sparsityData?.trace_forward ?? []).some(
-                                  (n) => n.via_channel === channel.index,
-                                ) && <div className="mt-2 text-[10px] font-semibold">Neurons Reading</div>}
+                                {(sparsityData?.trace_forward ?? []).some((n) => n.via_channel === channel.index) && (
+                                  <div className="mt-2 text-[10px] font-semibold">Neurons Reading</div>
+                                )}
                                 {(sparsityData?.trace_forward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
                                   .map((n) => {
@@ -1502,30 +1501,48 @@ export default function ConnectedNeuronsPane({
 
                   // Get explanation for this neuron
                   const allExplanations = getAllNeuronExplanations(neuron.layer, neuron.index);
-                  const explanation = allExplanations.length > 0 ? allExplanations[0].description : null;
+                  // Sort explanations: top (non-negative) first, then bottom (negative activations)
+                  const sortedExplanations = [...allExplanations].sort((a, b) => {
+                    const aIsBottom = a.description.includes('(negative activations)');
+                    const bIsBottom = b.description.includes('(negative activations)');
+                    return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                  });
                   const isBackward = neuron.direction === 'backward';
 
                   return (
                     <div key={neuron.index}>
-                      {/* Explanation label */}
-                      {explanation && (
+                      {/* Explanation labels - stacked vertically */}
+                      {sortedExplanations.length > 0 && (
                         <div
-                          className="absolute max-w-[120px] truncate text-[8px] leading-3 text-slate-500"
+                          className="absolute flex max-w-[120px] flex-col"
                           style={{
-                            top: `${position.top}px`,
+                            top: `${position.top - (sortedExplanations.length > 1 ? 3 : 0)}px`,
                             ...(isBackward
                               ? {
                                   right: `calc(100% - ${position.left}px + 4px)`,
-                                  textAlign: 'right',
+                                  alignItems: 'flex-end',
                                 }
                               : {
                                   left: `${position.left + 16}px`,
-                                  textAlign: 'left',
+                                  alignItems: 'flex-start',
                                 }),
                           }}
-                          title={explanation}
                         >
-                          {explanation}
+                          {sortedExplanations.map((exp) => {
+                            const isBottomActivation = exp.description.includes('(negative activations)');
+                            const displayText = exp.description.replace(' (negative activations)', '');
+                            const colorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                            return (
+                              <div
+                                key={exp.id}
+                                className={`truncate text-[7px] font-medium leading-[8.5px] ${colorClass}`}
+                                style={{ maxWidth: '120px' }}
+                                title={displayText}
+                              >
+                                {displayText}
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                       {/* Neuron circle with hover card showing feature dashboard */}
@@ -1582,7 +1599,7 @@ export default function ConnectedNeuronsPane({
                             </Link>
                             {allExplanations.length > 0 && (
                               <div className="mb-0 mt-3 text-[9px] font-bold uppercase text-slate-500">
-                                Explanation Labels
+                                Explanations
                               </div>
                             )}
                             {allExplanations.length > 0 && (
@@ -1599,7 +1616,7 @@ export default function ConnectedNeuronsPane({
                                     return (
                                       <div
                                         key={exp.id}
-                                        className={`mb-0.5 text-[10px] font-medium leading-snug ${colorClass}`}
+                                        className={`mb-0.5 text-[12px] font-medium leading-snug ${colorClass}`}
                                       >
                                         {exp.description.replace(' (negative activations)', '')}
                                       </div>
