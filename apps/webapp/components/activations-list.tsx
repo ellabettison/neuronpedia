@@ -1,3 +1,5 @@
+/* eslint-disable import/no-cycle */
+
 'use client';
 
 import { MODEL_HAS_CONNECTED_NEURONS } from '@/app/[modelId]/[layer]/[index]/feature-dashboard';
