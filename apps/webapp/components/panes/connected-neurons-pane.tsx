@@ -581,10 +581,6 @@ export default function ConnectedNeuronsPane({
   // Get number of unique layers for height calculation
   const uniqueLayers = new Set(connectedNeurons.map((n) => n.layer)).size;
 
-  // For the current neuron, track which channels are inputs (backward) vs outputs (forward)
-  const inputChannelIds = new Set(sparsityData?.trace_backward.map((n) => `channel.${n.via_channel}`) ?? []);
-  const outputChannelIds = new Set(sparsityData?.trace_forward.map((n) => `channel.${n.via_channel}`) ?? []);
-
   // Fixed height for current neuron rectangle (used for both rectangle and layer segment)
   const currentNeuronRectHeight = 68;
   // Height of the arrow/fade area above the current neuron rectangle
@@ -717,9 +713,18 @@ export default function ConnectedNeuronsPane({
               </div>
 
               {/* Connection lines between neurons and channels (rendered first so they appear below channels) */}
-              {connectedNeurons
-                .filter((neuron) => !neuron.current) // Skip current neuron - no connection lines for it
-                .map((neuron) => {
+              {(() => {
+                // Calculate max absolute weight across all non-current neurons for stroke width normalization
+                const nonCurrentNeurons = connectedNeurons.filter((n) => !n.current);
+                const maxAbsWeight = Math.max(
+                  ...nonCurrentNeurons.map((n) => {
+                    const weight = n.direction === 'backward' ? n.writeWeight : n.readWeight;
+                    return Math.abs(weight ?? 0);
+                  }),
+                  0.001, // Prevent division by zero
+                );
+
+                return nonCurrentNeurons.map((neuron) => {
                   const position = neuronPositions.get(neuron.index);
                   if (!position) return null;
 
@@ -759,6 +764,12 @@ export default function ConnectedNeuronsPane({
                         const strokeColor = isHighlighted
                           ? '#64748b' // slate-500 - darker gray when highlighted
                           : '#cbd5e1'; // slate-300 - gray by default
+
+                        // Calculate stroke width proportional to absolute weight (range: 1-4px)
+                        const weight = isBackward ? neuron.writeWeight : neuron.readWeight;
+                        const absWeight = Math.abs(weight ?? 0);
+                        const normalizedWeight = absWeight / maxAbsWeight;
+                        const strokeWidth = 1 + normalizedWeight * 3; // Scale from 1px to 4px
 
                         // Create unique marker IDs
                         const markerEndId = `arrow-end-${neuron.index}-${channel.id}`;
@@ -811,18 +822,19 @@ export default function ConnectedNeuronsPane({
                             Q ${midX} ${midY},
                               ${adjustedNeuronX} ${neuronConnectionY}`}
                               stroke={strokeColor}
-                              strokeWidth="2"
+                              strokeWidth={strokeWidth}
                               fill="none"
                               markerStart={isOutputLine ? `url(#${markerStartId})` : undefined}
                               markerEnd={isOutputLine ? undefined : `url(#${markerEndId})`}
-                              style={{ transition: 'stroke 0.3s ease' }}
+                              style={{ transition: 'stroke 0.3s ease, stroke-width 0.3s ease' }}
                             />
                           </svg>
                         );
                       })}
                     </div>
                   );
-                })}
+                });
+              })()}
 
               {resChannels.map((channel, arrayIndex) => {
                 // Check if this channel is connected to the hovered neuron
@@ -1019,8 +1031,10 @@ export default function ConnectedNeuronsPane({
                               >
                                 <div className="text-xs font-bold">Residual Channel {channel.index}</div>
 
-                                {/* Writers: backward neurons + current if it outputs to this channel */}
-                                <div className="mt-2 text-[10px] font-semibold">Neurons Writing</div>
+                                {/* Writers: backward neurons that write to this channel */}
+                                {(sparsityData?.trace_backward ?? []).some(
+                                  (n) => n.via_channel === channel.index,
+                                ) && <div className="mt-2 text-[10px] font-semibold">Neurons Writing</div>}
                                 {(sparsityData?.trace_backward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
                                   .map((n) => {
@@ -1064,114 +1078,10 @@ export default function ConnectedNeuronsPane({
                                       </div>
                                     );
                                   })}
-                                {outputChannelIds.has(channel.id) && sparsityData && (
-                                  <div className="mb-1 ml-2">
-                                    <div className="text-[10px] font-medium">
-                                      <Link
-                                        href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
-                                        className="font-mono text-sky-700 hover:underline"
-                                      >
-                                        {sparsityData.layer}-MLP @ {sparsityData.neuron}
-                                      </Link>{' '}
-                                      <span className="text-slate-400">(current)</span>{' '}
-                                      <span className="text-slate-400">
-                                        (w:{' '}
-                                        {sparsityData.trace_forward
-                                          .find((n) => n.via_channel === channel.index)
-                                          ?.write_weight.toFixed(3) ?? 'N/A'}
-                                        )
-                                      </span>
-                                    </div>
-                                    {(() => {
-                                      const currentExplanations = getAllNeuronExplanations(
-                                        sparsityData.layer,
-                                        String(sparsityData.neuron),
-                                      );
-                                      return (
-                                        currentExplanations.length > 0 && (
-                                          <div className="ml-3">
-                                            {currentExplanations
-                                              .sort((a, b) => {
-                                                const aIsBottom = a.description.includes('(negative activations)');
-                                                const bIsBottom = b.description.includes('(negative activations)');
-                                                return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
-                                              })
-                                              .map((exp) => {
-                                                const isBottomActivation =
-                                                  exp.description.includes('(negative activations)');
-                                                const colorClass = isBottomActivation
-                                                  ? 'text-rose-500'
-                                                  : 'text-emerald-600';
-                                                return (
-                                                  <div
-                                                    key={exp.id}
-                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
-                                                  >
-                                                    {exp.description.replace(' (negative activations)', '')}
-                                                  </div>
-                                                );
-                                              })}
-                                          </div>
-                                        )
-                                      );
-                                    })()}
-                                  </div>
-                                )}
-                                {/* Readers: forward neurons + current if it inputs from this channel */}
-                                <div className="mt-2 text-[10px] font-semibold">Neurons Reading</div>
-                                {inputChannelIds.has(channel.id) && sparsityData && (
-                                  <div className="mb-1 ml-2">
-                                    <div className="text-[10px] font-medium">
-                                      <Link
-                                        href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
-                                        className="font-mono text-sky-700 hover:underline"
-                                      >
-                                        {sparsityData.layer}-MLP @ {sparsityData.neuron}
-                                      </Link>{' '}
-                                      <span className="text-slate-400">(current)</span>{' '}
-                                      <span className="text-slate-400">
-                                        (r:{' '}
-                                        {sparsityData.trace_backward
-                                          .find((n) => n.via_channel === channel.index)
-                                          ?.read_weight.toFixed(3) ?? 'N/A'}
-                                        )
-                                      </span>
-                                    </div>
-                                    {(() => {
-                                      const currentExplanations = getAllNeuronExplanations(
-                                        sparsityData.layer,
-                                        String(sparsityData.neuron),
-                                      );
-                                      return (
-                                        currentExplanations.length > 0 && (
-                                          <div className="ml-3">
-                                            {currentExplanations
-                                              .sort((a, b) => {
-                                                const aIsBottom = a.description.includes('(negative activations)');
-                                                const bIsBottom = b.description.includes('(negative activations)');
-                                                return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
-                                              })
-                                              .map((exp) => {
-                                                const isBottomActivation =
-                                                  exp.description.includes('(negative activations)');
-                                                const colorClass = isBottomActivation
-                                                  ? 'text-rose-500'
-                                                  : 'text-emerald-600';
-                                                return (
-                                                  <div
-                                                    key={exp.id}
-                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
-                                                  >
-                                                    {exp.description.replace(' (negative activations)', '')}
-                                                  </div>
-                                                );
-                                              })}
-                                          </div>
-                                        )
-                                      );
-                                    })()}
-                                  </div>
-                                )}
+                                {/* Readers: forward neurons that read from this channel */}
+                                {(sparsityData?.trace_forward ?? []).some(
+                                  (n) => n.via_channel === channel.index,
+                                ) && <div className="mt-2 text-[10px] font-semibold">Neurons Reading</div>}
                                 {(sparsityData?.trace_forward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
                                   .map((n) => {
@@ -1658,12 +1568,12 @@ export default function ConnectedNeuronsPane({
                           />
                         </HoverCardTrigger>
                         <HoverCardContent
-                          className="max-h-[550px] w-[512px] min-w-[512px] max-w-[512px] overflow-y-auto border bg-white p-0"
+                          className="max-h-[640px] min-h-[640px] w-[640px] min-w-[640px] max-w-[640px] overflow-y-auto border bg-white p-0"
                           side={neuron.direction === 'backward' ? 'left' : 'right'}
                           sideOffset={5}
                         >
                           {/* Original tooltip content */}
-                          <div className="border-b border-slate-200 px-3 py-3 text-xs text-slate-600">
+                          <div className="px-3 py-3 text-xs text-slate-600">
                             <Link
                               href={`/${currentNeuron?.modelId}/${neuron.layer}-mlp/${neuron.index}`}
                               className="flex flex-row items-center gap-x-1 font-mono text-xs font-bold uppercase text-sky-700 hover:underline"

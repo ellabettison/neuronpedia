@@ -31,7 +31,7 @@ import {
 import { useEffect, useMemo, useState } from 'react';
 import BookmarkButton from './bookmark-button';
 
-const MODEL_HAS_CONNECTED_NEURONS = ['circuitgpt-python'];
+export const MODEL_HAS_CONNECTED_NEURONS = ['circuitgpt-python'];
 
 export default function FeatureDashboard({
   initialNeuron,
@@ -373,20 +373,23 @@ export default function FeatureDashboard({
         </div>
 
         {/* === DEAD FEATURE */}
-        {currentNeuron?.maxActApprox === 0 && !hideDeadWarning && !currentNeuron?.hasVector && (
-          <div className="absolute left-0 top-0 flex h-full w-full flex-col items-center bg-slate-50 pt-12">
-            <div className="font-bold text-slate-900">This feature has no known activations.</div>
-            <button
-              type="button"
-              onClick={() => {
-                setHideDeadWarning(true);
-              }}
-              className="mt-3 rounded-lg bg-slate-600 px-5 py-2 text-slate-200 hover:bg-slate-500"
-            >
-              Show Anyway
-            </button>
-          </div>
-        )}
+        {currentNeuron?.maxActApprox === 0 &&
+          !MODEL_HAS_CONNECTED_NEURONS.includes(currentNeuron?.modelId || '') &&
+          !hideDeadWarning &&
+          !currentNeuron?.hasVector && (
+            <div className="absolute left-0 top-0 flex h-full w-full flex-col items-center bg-slate-50 pt-12">
+              <div className="font-bold text-slate-900">This feature has no known activations.</div>
+              <button
+                type="button"
+                onClick={() => {
+                  setHideDeadWarning(true);
+                }}
+                className="mt-3 rounded-lg bg-slate-600 px-5 py-2 text-slate-200 hover:bg-slate-500"
+              >
+                Show Anyway
+              </button>
+            </div>
+          )}
       </div>
     </div>
   );

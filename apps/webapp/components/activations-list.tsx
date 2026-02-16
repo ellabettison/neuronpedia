@@ -1,5 +1,6 @@
 'use client';
 
+import { MODEL_HAS_CONNECTED_NEURONS } from '@/app/[modelId]/[layer]/[index]/feature-dashboard';
 import ActivationSingleForm from '@/components/activation-single-form';
 import { ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS } from '@/lib/utils/activations';
 import * as ToggleGroup from '@radix-ui/react-toggle-group';
@@ -57,11 +58,14 @@ export default function ActivationsList({
   // used for showing correct snippet
   const [selectedRange, setSelectedRange] = useState(defaultRange);
   const [showLineBreaks, setShowLineBreaks] = useState(defaultShowLineBreaks);
-  const [showRawTokens, setShowRawTokens] = useState(defaultShowRawTokens);
+  const isConnectedNeuronsModel = MODEL_HAS_CONNECTED_NEURONS.includes(feature?.modelId || '');
+  const [showRawTokens, setShowRawTokens] = useState(isConnectedNeuronsModel ? true : defaultShowRawTokens);
   const [dfaSplit, setDfaSplit] = useState(true);
   // used to determine colors
   const [overallMaxValue, setOverallMaxValue] = useState<number>(-100);
   const [items, setItems] = useState<ActivationPartialWithRelations[]>([]);
+  const [topItems, setTopItems] = useState<ActivationPartialWithRelations[]>([]);
+  const [bottomItems, setBottomItems] = useState<ActivationPartialWithRelations[]>([]);
   const [activationTestText, setActivationTestText] = useState('');
   const [showHidden, setShowHidden] = useState(false);
 
@@ -81,9 +85,26 @@ export default function ActivationsList({
     if (activations && activations.length > 0) {
       setOverallMaxValue(getMaxValueOfActivations(activations));
       let sortedActs = activations;
+      // For models with connected neurons, always show all activations without filtering
+      const skipFiltering = MODEL_HAS_CONNECTED_NEURONS.includes(feature?.modelId || '');
+
+      // For connected neurons models, split into top/bottom columns
+      if (skipFiltering) {
+        const topActivations = activations
+          .filter((act) => act.dataSource === 'top')
+          .toSorted((a, b) => (b.maxValue || 0) - (a.maxValue || 0)); // highest to lowest
+        const bottomActivations = activations
+          .filter((act) => act.dataSource === 'bottom')
+          .toSorted((a, b) => (a.maxValue || 0) - (b.maxValue || 0)); // lowest to highest
+        setTopItems(topActivations);
+        setBottomItems(bottomActivations);
+        setItems(activations);
+        return;
+      }
+
       if (getSourceSet(feature?.modelId || '', feature?.sourceSetName || '')?.showDfa) {
         // remove all where the dfaTargetIndex !== maxActIndex
-        if (!showHidden) {
+        if (!showHidden && !skipFiltering) {
           sortedActs = activations.filter((act) => act.dfaTargetIndex === act.maxValueTokenIndex);
           // remove duplicate sortedacts where act.tokens are the same
           const uniqueActsMap = new Map<string, ActivationPartialWithRelations>();
@@ -153,7 +174,7 @@ export default function ActivationsList({
           return 0;
         });
       } else {
-        if (!showHidden) {
+        if (!showHidden && !skipFiltering) {
           // remove duplicate sortedacts where act.tokens are the same
           const uniqueActsMap = new Map<string, ActivationPartialWithRelations>();
           activations.forEach((act) => {
@@ -365,7 +386,100 @@ export default function ActivationsList({
           <div className="flex h-48 w-full flex-col items-center justify-center">
             <h1 className="text-lg font-bold text-slate-300">No Known Activations</h1>
           </div>
+        ) : isConnectedNeuronsModel ? (
+          // Two-column layout for connected neurons models
+          <div className="flex flex-col gap-x-0 sm:flex-row">
+            {/* Left column: Top activations (highest to lowest) */}
+            <div className="flex-1 border-r border-slate-200">
+              <div className="flex flex-row items-center gap-x-1 bg-slate-100 px-3 py-2 font-mono text-[10px] font-bold uppercase text-slate-600">
+                <div className="rounded-sm bg-emerald-400 px-1 py-[1px]">Positive</div> Activations
+              </div>
+              {topItems.length === 0 ? (
+                <div className="flex h-24 items-center justify-center text-sm text-slate-400">No top activations</div>
+              ) : (
+                topItems.map((activation, activationIndex) => (
+                  <div
+                    key={`top-activation-${activation.id}`}
+                    className={`relative border-slate-100 px-3 py-1 [&:not(:last-child)]:border-b ${
+                      selectedRange > 0 && 'sm:py-2'
+                    }`}
+                  >
+                    <div className="flex w-full flex-row items-center justify-center">
+                      <div className="flex w-full flex-auto flex-col text-left text-sm">
+                        {activation.tokens && (
+                          <ActivationItem
+                            key={`top-${ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size}-${activationIndex}${showLineBreaks}`}
+                            activation={activation}
+                            tokensToDisplayAroundMaxActToken={
+                              ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size
+                            }
+                            showLineBreaks={showLineBreaks}
+                            setActivationTestText={setActivationTestText}
+                            showTopActivationToken={showTopActivationToken}
+                            dfa={getSourceSet(feature?.modelId || '', feature?.sourceSetName || '')?.showDfa}
+                            dfaSplit={dfaSplit}
+                            showCopy={showCopy}
+                            overallMaxActivationValueInList={overallMaxValue}
+                            overrideLeading={overrideLeading}
+                            overrideTextSize={overrideTextSize || 'text-[9.5px] sm:text-xs'}
+                            className={activationItemClassName}
+                            showRawTokens={showRawTokens}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+            {/* Right column: Bottom activations (lowest to highest) */}
+            <div className="flex-1">
+              <div className="flex flex-row items-center gap-x-1 bg-slate-100 px-3 py-2 font-mono text-[10px] font-bold uppercase text-slate-600">
+                <div className="rounded-sm bg-rose-400 px-1 py-[1px]">Negative</div> Activations
+              </div>
+              {bottomItems.length === 0 ? (
+                <div className="flex h-24 items-center justify-center text-sm text-slate-400">
+                  No bottom activations
+                </div>
+              ) : (
+                bottomItems.map((activation, activationIndex) => (
+                  <div
+                    key={`bottom-activation-${activation.id}`}
+                    className={`relative border-slate-100 px-3 py-1 [&:not(:last-child)]:border-b ${
+                      selectedRange > 0 && 'sm:py-2'
+                    }`}
+                  >
+                    <div className="flex w-full flex-row items-center justify-center">
+                      <div className="flex w-full flex-auto flex-col text-left text-sm">
+                        {activation.tokens && (
+                          <ActivationItem
+                            key={`bottom-${ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size}-${activationIndex}${showLineBreaks}`}
+                            activation={activation}
+                            tokensToDisplayAroundMaxActToken={
+                              ACTIVATION_DISPLAY_DEFAULT_CONTEXT_TOKENS[selectedRange].size
+                            }
+                            showLineBreaks={showLineBreaks}
+                            setActivationTestText={setActivationTestText}
+                            showTopActivationToken={showTopActivationToken}
+                            dfa={getSourceSet(feature?.modelId || '', feature?.sourceSetName || '')?.showDfa}
+                            dfaSplit={dfaSplit}
+                            showCopy={showCopy}
+                            overallMaxActivationValueInList={overallMaxValue}
+                            overrideLeading={overrideLeading}
+                            overrideTextSize={overrideTextSize || 'text-[9.5px] sm:text-xs'}
+                            className={activationItemClassName}
+                            showRawTokens={showRawTokens}
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         ) : (
+          // Standard single-column layout
           <>
             {items.map((activation, activationIndex) => (
               <div
