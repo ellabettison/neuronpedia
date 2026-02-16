@@ -1023,68 +1023,198 @@ export default function ConnectedNeuronsPane({
                                 <div className="mt-2 text-[10px] font-semibold">Neurons Writing</div>
                                 {(sparsityData?.trace_backward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
-                                  .map((n) => (
-                                    <div key={`writer-${n.neuron}`} className="ml-2 text-[10px] font-medium">
+                                  .map((n) => {
+                                    const neuronExplanations = getAllNeuronExplanations(n.layer, String(n.neuron));
+                                    return (
+                                      <div key={`writer-${n.neuron}`} className="mb-1 ml-2">
+                                        <div className="text-[10px] font-medium">
+                                          <Link
+                                            href={`/${currentNeuron?.modelId}/${n.layer}-mlp/${n.neuron}`}
+                                            className="font-mono text-sky-700 hover:underline"
+                                          >
+                                            {n.layer}-MLP @ {n.neuron}
+                                          </Link>{' '}
+                                          <span className="text-slate-400">(w: {n.write_weight.toFixed(3)})</span>
+                                        </div>
+                                        {neuronExplanations.length > 0 && (
+                                          <div className="ml-3">
+                                            {neuronExplanations
+                                              .sort((a, b) => {
+                                                const aIsBottom = a.description.includes('(negative activations)');
+                                                const bIsBottom = b.description.includes('(negative activations)');
+                                                return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                              })
+                                              .map((exp) => {
+                                                const isBottomActivation =
+                                                  exp.description.includes('(negative activations)');
+                                                const colorClass = isBottomActivation
+                                                  ? 'text-rose-500'
+                                                  : 'text-emerald-600';
+                                                return (
+                                                  <div
+                                                    key={exp.id}
+                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
+                                                  >
+                                                    {exp.description.replace(' (negative activations)', '')}
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                {outputChannelIds.has(channel.id) && sparsityData && (
+                                  <div className="mb-1 ml-2">
+                                    <div className="text-[10px] font-medium">
                                       <Link
-                                        href={`/${currentNeuron?.modelId}/${n.layer}-mlp/${n.neuron}`}
+                                        href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
                                         className="font-mono text-sky-700 hover:underline"
                                       >
-                                        {n.layer}-MLP @ {n.neuron}
+                                        {sparsityData.layer}-MLP @ {sparsityData.neuron}
                                       </Link>{' '}
-                                      <span className="text-slate-400">(w: {n.write_weight.toFixed(3)})</span>
+                                      <span className="text-slate-400">(current)</span>{' '}
+                                      <span className="text-slate-400">
+                                        (w:{' '}
+                                        {sparsityData.trace_forward
+                                          .find((n) => n.via_channel === channel.index)
+                                          ?.write_weight.toFixed(3) ?? 'N/A'}
+                                        )
+                                      </span>
                                     </div>
-                                  ))}
-                                {outputChannelIds.has(channel.id) && sparsityData && (
-                                  <div className="ml-2 text-[10px] font-medium">
-                                    <Link
-                                      href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
-                                      className="font-mono text-sky-700 hover:underline"
-                                    >
-                                      {sparsityData.layer}-MLP @ {sparsityData.neuron}
-                                    </Link>{' '}
-                                    <span className="text-slate-400">(current)</span>{' '}
-                                    <span className="text-slate-400">
-                                      (w:{' '}
-                                      {sparsityData.trace_forward
-                                        .find((n) => n.via_channel === channel.index)
-                                        ?.write_weight.toFixed(3) ?? 'N/A'}
-                                      )
-                                    </span>
+                                    {(() => {
+                                      const currentExplanations = getAllNeuronExplanations(
+                                        sparsityData.layer,
+                                        String(sparsityData.neuron),
+                                      );
+                                      return (
+                                        currentExplanations.length > 0 && (
+                                          <div className="ml-3">
+                                            {currentExplanations
+                                              .sort((a, b) => {
+                                                const aIsBottom = a.description.includes('(negative activations)');
+                                                const bIsBottom = b.description.includes('(negative activations)');
+                                                return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                              })
+                                              .map((exp) => {
+                                                const isBottomActivation =
+                                                  exp.description.includes('(negative activations)');
+                                                const colorClass = isBottomActivation
+                                                  ? 'text-rose-500'
+                                                  : 'text-emerald-600';
+                                                return (
+                                                  <div
+                                                    key={exp.id}
+                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
+                                                  >
+                                                    {exp.description.replace(' (negative activations)', '')}
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                        )
+                                      );
+                                    })()}
                                   </div>
                                 )}
                                 {/* Readers: forward neurons + current if it inputs from this channel */}
                                 <div className="mt-2 text-[10px] font-semibold">Neurons Reading</div>
                                 {inputChannelIds.has(channel.id) && sparsityData && (
-                                  <div className="ml-2 text-[10px] font-medium">
-                                    <Link
-                                      href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
-                                      className="font-mono text-sky-700 hover:underline"
-                                    >
-                                      {sparsityData.layer}-MLP @ {sparsityData.neuron}
-                                    </Link>{' '}
-                                    <span className="text-slate-400">(current)</span>{' '}
-                                    <span className="text-slate-400">
-                                      (r:{' '}
-                                      {sparsityData.trace_backward
-                                        .find((n) => n.via_channel === channel.index)
-                                        ?.read_weight.toFixed(3) ?? 'N/A'}
-                                      )
-                                    </span>
+                                  <div className="mb-1 ml-2">
+                                    <div className="text-[10px] font-medium">
+                                      <Link
+                                        href={`/${currentNeuron?.modelId}/${sparsityData.layer}-mlp/${sparsityData.neuron}`}
+                                        className="font-mono text-sky-700 hover:underline"
+                                      >
+                                        {sparsityData.layer}-MLP @ {sparsityData.neuron}
+                                      </Link>{' '}
+                                      <span className="text-slate-400">(current)</span>{' '}
+                                      <span className="text-slate-400">
+                                        (r:{' '}
+                                        {sparsityData.trace_backward
+                                          .find((n) => n.via_channel === channel.index)
+                                          ?.read_weight.toFixed(3) ?? 'N/A'}
+                                        )
+                                      </span>
+                                    </div>
+                                    {(() => {
+                                      const currentExplanations = getAllNeuronExplanations(
+                                        sparsityData.layer,
+                                        String(sparsityData.neuron),
+                                      );
+                                      return (
+                                        currentExplanations.length > 0 && (
+                                          <div className="ml-3">
+                                            {currentExplanations
+                                              .sort((a, b) => {
+                                                const aIsBottom = a.description.includes('(negative activations)');
+                                                const bIsBottom = b.description.includes('(negative activations)');
+                                                return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                              })
+                                              .map((exp) => {
+                                                const isBottomActivation =
+                                                  exp.description.includes('(negative activations)');
+                                                const colorClass = isBottomActivation
+                                                  ? 'text-rose-500'
+                                                  : 'text-emerald-600';
+                                                return (
+                                                  <div
+                                                    key={exp.id}
+                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
+                                                  >
+                                                    {exp.description.replace(' (negative activations)', '')}
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                        )
+                                      );
+                                    })()}
                                   </div>
                                 )}
                                 {(sparsityData?.trace_forward ?? [])
                                   .filter((n) => n.via_channel === channel.index)
-                                  .map((n) => (
-                                    <div key={`reader-${n.neuron}`} className="ml-2 text-[10px] font-medium">
-                                      <Link
-                                        href={`/${currentNeuron?.modelId}/${n.layer}-mlp/${n.neuron}`}
-                                        className="font-mono text-sky-700 hover:underline"
-                                      >
-                                        {n.layer}-MLP @ {n.neuron}
-                                      </Link>{' '}
-                                      <span className="text-slate-400">(r: {n.read_weight.toFixed(3)})</span>
-                                    </div>
-                                  ))}
+                                  .map((n) => {
+                                    const neuronExplanations = getAllNeuronExplanations(n.layer, String(n.neuron));
+                                    return (
+                                      <div key={`reader-${n.neuron}`} className="mb-1 ml-2">
+                                        <div className="text-[10px] font-medium">
+                                          <Link
+                                            href={`/${currentNeuron?.modelId}/${n.layer}-mlp/${n.neuron}`}
+                                            className="font-mono text-sky-700 hover:underline"
+                                          >
+                                            {n.layer}-MLP @ {n.neuron}
+                                          </Link>{' '}
+                                          <span className="text-slate-400">(r: {n.read_weight.toFixed(3)})</span>
+                                        </div>
+                                        {neuronExplanations.length > 0 && (
+                                          <div className="ml-3">
+                                            {neuronExplanations
+                                              .sort((a, b) => {
+                                                const aIsBottom = a.description.includes('(negative activations)');
+                                                const bIsBottom = b.description.includes('(negative activations)');
+                                                return aIsBottom === bIsBottom ? 0 : aIsBottom ? 1 : -1;
+                                              })
+                                              .map((exp) => {
+                                                const isBottomActivation =
+                                                  exp.description.includes('(negative activations)');
+                                                const colorClass = isBottomActivation
+                                                  ? 'text-rose-500'
+                                                  : 'text-emerald-600';
+                                                return (
+                                                  <div
+                                                    key={exp.id}
+                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
+                                                  >
+                                                    {exp.description.replace(' (negative activations)', '')}
+                                                  </div>
+                                                );
+                                              })}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 {/* All layer explanations */}
                                 {allExplanations.length > 0 && (
                                   <div className="mt-2">
