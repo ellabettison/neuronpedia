@@ -204,7 +204,7 @@ function computeNeuronPositions(
 
   // Calculate cumulative top positions based on neuron counts
   // Each layer gets height based on its neuron count
-  const neuronSpacing = 16; // Vertical space per neuron
+  const neuronSpacing = 24; // Vertical space per neuron
   const minLayerHeight = 40; // Minimum height for a layer
   const layerGap = 20; // Gap between layers
 
@@ -1060,15 +1060,23 @@ export default function ConnectedNeuronsPane({
                                               .map((exp) => {
                                                 const isBottomActivation =
                                                   exp.description.includes('(negative activations)');
-                                                const colorClass = isBottomActivation
+                                                const signColorClass = isBottomActivation
                                                   ? 'text-rose-500'
                                                   : 'text-emerald-600';
+                                                const sign = isBottomActivation ? '-' : '+';
                                                 return (
                                                   <div
                                                     key={exp.id}
-                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
+                                                    className="flex items-center gap-x-1 text-[9px] font-medium leading-snug"
                                                   >
-                                                    {exp.description.replace(' (negative activations)', '')}
+                                                    <span
+                                                      className={`font-mono text-[11px] font-bold leading-none ${signColorClass}`}
+                                                    >
+                                                      {sign}
+                                                    </span>
+                                                    <span className="text-slate-600">
+                                                      {exp.description.replace(' (negative activations)', '')}
+                                                    </span>
                                                   </div>
                                                 );
                                               })}
@@ -1107,15 +1115,23 @@ export default function ConnectedNeuronsPane({
                                               .map((exp) => {
                                                 const isBottomActivation =
                                                   exp.description.includes('(negative activations)');
-                                                const colorClass = isBottomActivation
+                                                const signColorClass = isBottomActivation
                                                   ? 'text-rose-500'
                                                   : 'text-emerald-600';
+                                                const sign = isBottomActivation ? '-' : '+';
                                                 return (
                                                   <div
                                                     key={exp.id}
-                                                    className={`text-[9px] font-medium leading-snug ${colorClass}`}
+                                                    className="flex items-center gap-x-1 text-[9px] font-medium leading-snug"
                                                   >
-                                                    {exp.description.replace(' (negative activations)', '')}
+                                                    <span
+                                                      className={`font-mono text-[11px] font-bold leading-none ${signColorClass}`}
+                                                    >
+                                                      {sign}
+                                                    </span>
+                                                    <span className="text-slate-600">
+                                                      {exp.description.replace(' (negative activations)', '')}
+                                                    </span>
                                                   </div>
                                                 );
                                               })}
@@ -1149,15 +1165,23 @@ export default function ConnectedNeuronsPane({
                                           .map((exp) => {
                                             const isBottomActivation =
                                               exp.description.includes('(negative activations)');
-                                            const colorClass = isBottomActivation
+                                            const signColorClass = isBottomActivation
                                               ? 'text-rose-500'
                                               : 'text-emerald-600';
+                                            const sign = isBottomActivation ? '-' : '+';
                                             return (
                                               <div
                                                 key={exp.id}
-                                                className={`mb-0.5 ml-3 text-[10px] font-medium leading-snug ${colorClass}`}
+                                                className="mb-0.5 ml-3 flex items-center gap-x-1 text-[10px] font-medium leading-snug"
                                               >
-                                                {exp.description.replace(' (negative activations)', '')}
+                                                <span
+                                                  className={`font-mono text-[12px] font-bold leading-none ${signColorClass}`}
+                                                >
+                                                  {sign}
+                                                </span>
+                                                <span className="text-slate-600">
+                                                  {exp.description.replace(' (negative activations)', '')}
+                                                </span>
                                               </div>
                                             );
                                           })}
@@ -1376,13 +1400,15 @@ export default function ConnectedNeuronsPane({
                       </div>
 
                       <div className="flex flex-col gap-x-2 text-[10px] font-bold">
-                        <div className="flex flex-row items-center gap-x-2 px-2">
-                          <span className="text-emerald-600">
+                        <div className="flex flex-row items-center gap-x-1 px-2">
+                          <span className="font-mono text-[12px] font-bold leading-none text-emerald-600">+</span>
+                          <span className="text-slate-600">
                             {getNeuronExplanation(currentNeuronData.layer, currentNeuronData.index, 'top')}
                           </span>
                         </div>
-                        <div className="flex flex-row items-center gap-x-2 px-2">
-                          <span className="text-rose-500">
+                        <div className="flex flex-row items-center gap-x-1 px-2">
+                          <span className="font-mono text-[12px] font-bold leading-none text-rose-500">-</span>
+                          <span className="text-slate-600">
                             {getNeuronExplanation(currentNeuronData.layer, currentNeuronData.index, 'bottom')}
                           </span>
                         </div>
@@ -1531,15 +1557,22 @@ export default function ConnectedNeuronsPane({
                           {sortedExplanations.map((exp) => {
                             const isBottomActivation = exp.description.includes('(negative activations)');
                             const displayText = exp.description.replace(' (negative activations)', '');
-                            const colorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                            const signColorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                            const sign = isBottomActivation ? '-' : '+';
                             return (
                               <div
                                 key={exp.id}
-                                className={`truncate text-[7px] font-medium leading-[8.5px] ${colorClass}`}
+                                className="flex items-center gap-x-0.5 text-[8px] font-medium leading-[10px]"
                                 style={{ maxWidth: '120px' }}
                                 title={displayText}
                               >
-                                {displayText}
+                                <span
+                                  className={`font-mono text-[10px] font-bold ${signColorClass}`}
+                                  style={{ lineHeight: '10px' }}
+                                >
+                                  {sign}
+                                </span>
+                                <span className="truncate text-slate-600">{displayText}</span>
                               </div>
                             );
                           })}
@@ -1612,13 +1645,21 @@ export default function ConnectedNeuronsPane({
                                   })
                                   .map((exp) => {
                                     const isBottomActivation = exp.description.includes('(negative activations)');
-                                    const colorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                                    const signColorClass = isBottomActivation ? 'text-rose-500' : 'text-emerald-600';
+                                    const sign = isBottomActivation ? '-' : '+';
                                     return (
                                       <div
                                         key={exp.id}
-                                        className={`mb-0.5 text-[12px] font-medium leading-snug ${colorClass}`}
+                                        className="mb-0.5 flex items-center gap-x-1.5 text-[12px] font-medium leading-snug"
                                       >
-                                        {exp.description.replace(' (negative activations)', '')}
+                                        <span
+                                          className={`font-mono text-[14px] font-bold leading-none ${signColorClass}`}
+                                        >
+                                          {sign}
+                                        </span>
+                                        <span className="text-slate-600">
+                                          {exp.description.replace(' (negative activations)', '')}
+                                        </span>
                                       </div>
                                     );
                                   })}
