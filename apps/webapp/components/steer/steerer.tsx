@@ -35,13 +35,14 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useState } from 'react';
 import SteerAdvancedSettings from './advanced-settings';
 import SteerCompletion from './completion';
-import SteerCompletionChat, { NNSIGHT_MODELS } from './completion-chat';
+import SteerCompletionChat from './completion-chat';
 import SteerPresetSelector from './preset-selector';
 import SteerSelectedFeature from './selected-feature';
 import SteerTooltip from './tooltip';
 
 const MODELS_TO_FILTER_OUT: string[] = []; // ['gpt-oss-20b']
 const MODELS_TO_FILTER_OUT_PREFIX = ['gemma-3-'];
+export const NNSIGHT_MODELS = ['llama3.3-70b-it', 'gpt-oss-20b'];
 
 export default function Steerer({
   initialModelId,
@@ -90,7 +91,9 @@ export default function Steerer({
 
   // Default Steering Settings
   const [steerTokens, setSteerTokens] = useState(
-    NNSIGHT_MODELS.includes(modelId) ? STEER_N_COMPLETION_TOKENS_LARGE_LLM : STEER_N_COMPLETION_TOKENS,
+    NNSIGHT_MODELS.includes(modelId) && modelId !== 'llama3.3-70b-it'
+      ? STEER_N_COMPLETION_TOKENS_LARGE_LLM
+      : STEER_N_COMPLETION_TOKENS,
   );
   const [temperature, setTemperature] = useState(STEER_TEMPERATURE);
   const [freqPenalty, setFreqPenalty] = useState(STEER_FREQUENCY_PENALTY);
@@ -318,7 +321,7 @@ export default function Steerer({
       setSteerSpecialTokens(!isCompletionMode);
       if (globalModels[modelId].thinking) {
         setSteerTokens(STEER_N_COMPLETION_TOKENS_THINKING);
-      } else if (NNSIGHT_MODELS.includes(modelId)) {
+      } else if (NNSIGHT_MODELS.includes(modelId) && modelId !== 'llama3.3-70b-it') {
         setSteerTokens(STEER_N_COMPLETION_TOKENS_LARGE_LLM);
       } else {
         setSteerTokens(STEER_N_COMPLETION_TOKENS);
