@@ -14,8 +14,8 @@ export default function TabMain({ tabUpdater }: { tabUpdater: (tab: string) => v
           <div className="flex w-full flex-col gap-y-1 text-center text-[13px]">
             <div className="mb-1.5 text-center text-sm font-bold text-slate-800">⚠️ Rolling Release</div>
             <div>
-              {`Significant issues with Google Cloud were blocking Gemma Scope 2 rollout on Neuronpedia, so we've`}{' '}
-              switched to AWS. We're now about ~85% complete.
+              {`Significant issues with Google Cloud were blocking Gemma Scope 2 rollout on Neuronpedia, so we've
+              switched to AWS. We're now about ~85% complete.`}
               <br />
               Track final progress in the{' '}
               <a

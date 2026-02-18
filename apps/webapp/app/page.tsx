@@ -119,8 +119,9 @@ export default function Page() {
                 >
                   <div className="mb-2 text-center text-sm font-bold text-slate-800">⚠️ Rolling Release</div>
                   <div>
-                    {`Significant issues with Google Cloud were blocking Gemma Scope 2 rollout on Neuronpedia, so we've`}
-                    switched to AWS. We're now about ~85% complete. Track final progress in the{' '}
+                    {`Significant issues with Google Cloud were blocking Gemma Scope 2 rollout on Neuronpedia, so we've
+                    switched to AWS. We're now about ~85% complete.`}{' '}
+                    Track final progress in the{' '}
                     <a
                       href="https://docs.google.com/spreadsheets/d/1eVjelj5Kzv7rTA688hYXhKFfit3UXCPDKPo9UfNEOaU/edit?usp=sharing"
                       target="_blank"
