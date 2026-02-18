@@ -112,15 +112,24 @@ export default function Page() {
                   trigger={
                     <span className="flex flex-col items-center justify-center gap-y-[5px] text-xs font-semibold text-slate-600">
                       <div className="flex flex-row items-center justify-center gap-x-1 rounded-full border border-gBlue bg-white px-4 py-0.5 text-[9.5px] font-bold uppercase text-gBlue transition-all hover:bg-gBlue hover:text-white">
-                        Dec 2025 - Rolling Release
+                        Dec 2025 - ⚠️ Rolling Release
                       </div>
                     </span>
                   }
                 >
                   <div className="mb-2 text-center text-sm font-bold text-slate-800">⚠️ Rolling Release</div>
                   <div>
-                    Neuronpedia is finalizing data uploads and feature label generation, a process which we expect to be
-                    completed by <strong>February 14, 2026</strong>.
+                    Significant issues with Google Cloud were blocking Gemma Scope 2 rollout on Neuronpedia, so we've
+                    switched to AWS. We're now about ~85% complete. Track final progress in the{' '}
+                    <a
+                      href="https://docs.google.com/spreadsheets/d/1eVjelj5Kzv7rTA688hYXhKFfit3UXCPDKPo9UfNEOaU/edit?usp=sharing"
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-sky-700"
+                    >
+                      shared document
+                    </a>
+                    .
                   </div>
                   <div className="mt-1">
                     The artifacts in Gemma Scope 2{' '}

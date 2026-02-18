@@ -14,8 +14,19 @@ export default function TabMain({ tabUpdater }: { tabUpdater: (tab: string) => v
           <div className="flex w-full flex-col gap-y-1 text-center text-[13px]">
             <div className="mb-1.5 text-center text-sm font-bold text-slate-800">⚠️ Rolling Release</div>
             <div>
-              Neuronpedia is finalizing data uploads and feature label generation, a process which we expect to be
-              completed by <strong>February 14, 2026</strong>.
+              Significant issues with Google Cloud were blocking Gemma Scope 2 rollout on Neuronpedia, so we've switched
+              to AWS. We're now about ~85% complete.
+              <br />
+              Track final progress in the{' '}
+              <a
+                href="https://docs.google.com/spreadsheets/d/1eVjelj5Kzv7rTA688hYXhKFfit3UXCPDKPo9UfNEOaU/edit?usp=sharing"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-sky-700"
+              >
+                shared document
+              </a>
+              .
             </div>
             <div>
               The artifacts in Gemma Scope 2{' '}
