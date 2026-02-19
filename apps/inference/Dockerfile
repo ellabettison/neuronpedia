@@ -117,6 +117,9 @@ RUN if [ -n "${CUSTOM_CA_BUNDLE}" ] && [ "${CUSTOM_CA_BUNDLE}" != ".nocustomca" 
 # Copy the client package first
 COPY packages/python/neuronpedia-inference-client /app/packages/python/neuronpedia-inference-client/
 
+# Copy local path dependencies needed by pyproject.toml
+COPY apps/inference/vendor /app/apps/inference/vendor/
+
 # Copy only poetry files
 COPY apps/inference/pyproject.toml apps/inference/poetry.lock* apps/inference/
 WORKDIR /app/apps/inference
