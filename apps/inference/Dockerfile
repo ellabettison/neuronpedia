@@ -6,7 +6,7 @@ ARG UBUNTU_VERSION=22.04
 ARG CUSTOM_CA_BUNDLE
 
 # NON-CUDA base
-FROM python:3.10-slim AS base-nocuda
+FROM python:3.12-slim AS base-nocuda
 
 # Re-declare ARG after FROM (ARGs don't persist across FROM statements)
 ARG CUSTOM_CA_BUNDLE
@@ -70,12 +70,18 @@ ENV GIT_SSL_CAINFO=${CUSTOM_CA_BUNDLE:+/etc/ssl/certs/ca-certificates.crt}
 RUN apt-get update && apt-get install -y \
     nvidia-container-toolkit \
     && rm -rf /var/lib/apt/lists/*
-RUN apt-get update && apt-get install -y \
-    python3.10 \
-    python3-pip \
-    python3.10-venv \
+RUN apt-get update && apt-get install -y software-properties-common \
+    && add-apt-repository -y ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
     && rm -rf /var/lib/apt/lists/* \
-    && ln -s /usr/bin/python3.10 /usr/bin/python
+    && ln -sf /usr/bin/python3.12 /usr/bin/python3 \
+    && ln -sf /usr/bin/python3.12 /usr/bin/python \
+    && python3.12 -m ensurepip --upgrade \
+    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip \
+    && ln -sf /usr/local/bin/pip3.12 /usr/local/bin/pip3
 
 # Main build stage
 FROM base-${BUILD_TYPE:-nocuda} AS final
