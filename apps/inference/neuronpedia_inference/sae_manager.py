@@ -227,7 +227,18 @@ class SAEManager:
         return self.sae_data.get(sae_id, {}).get("type")
 
     def get_sae_hook(self, sae_id: str) -> str:
-        return self.sae_data.get(sae_id, {}).get("hook")
+        hook = self.sae_data.get(sae_id, {}).get("hook")
+        if hook is None:
+            # Fallback: derive hook_name from sae_id (e.g. "17-gemmascope-2-res-16k" -> layer 17)
+            try:
+                layer_num = int(sae_id.split("-")[0]) if not sae_id.isdigit() else int(sae_id)
+                hook = f"blocks.{layer_num}.hook_resid_post"
+                logger.warning(
+                    f"hook_name was None for SAE {sae_id}, using fallback: {hook}"
+                )
+            except (ValueError, IndexError):
+                logger.error(f"hook_name is None for SAE {sae_id} and could not derive fallback")
+        return hook
 
     def is_dfa_enabled(self, sae_id: str) -> bool:
         return self.sae_data.get(sae_id, {}).get("dfa_enabled", False)
