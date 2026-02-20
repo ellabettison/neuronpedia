@@ -113,6 +113,19 @@ class SAEManager:
             dtype=self.config.sae_dtype,
         )
 
+        if hook_name is None:
+            # Fallback: derive hook_name from sae_id pattern (e.g. "17-gemmascope-2-res-16k")
+            try:
+                layer_num = int(sae_id.split("-")[0])
+                hook_name = f"blocks.{layer_num}.hook_resid_post"
+                logger.warning(
+                    f"hook_name was None for SAE {sae_id}, derived fallback: {hook_name}"
+                )
+            except (ValueError, IndexError):
+                logger.error(f"hook_name is None for SAE {sae_id} and could not derive fallback")
+
+        logger.info(f"SAE {sae_id}: hook_name={hook_name}")
+
         self.sae_data[sae_id] = {
             "sae": loaded_sae,
             "hook": hook_name,
