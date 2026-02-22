@@ -420,7 +420,7 @@ async def check_model(
                 return JSONResponse(
                     content={"error": "Unsupported model"}, status_code=400
                 )
-        except (json.JSONDecodeError, ValueError):
+        except (json.JSONDecodeError, ValueError, Exception):
             pass
 
     return await call_next(request)

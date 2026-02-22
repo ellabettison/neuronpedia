@@ -120,8 +120,19 @@ async def activation_all_batch(
         logger.info("Processing activations for %d prompts", len(processed_prompts))
         processor = ActivationProcessor()
 
-        # Process all prompts in parallel using batched GPU operations
-        results = processor.process_activations_batch(request, processed_prompts)
+        try:
+            # Process all prompts in parallel using batched GPU operations
+            results = processor.process_activations_batch(request, processed_prompts)
+        except torch.cuda.OutOfMemoryError:
+            logger.warning(
+                "CUDA OOM on batch of %d prompts, falling back to sequential processing",
+                len(processed_prompts),
+            )
+            torch.cuda.empty_cache()
+            results = []
+            for prompt in processed_prompts:
+                results.append(processor.process_activations(request, prompt))
+                torch.cuda.empty_cache()
 
         logger.info("Activations results processed successfully")
 
@@ -251,10 +262,9 @@ class ActivationProcessor:
                     truncate=False,
                 )[0]
 
-            batch_token_limit = config.token_limit / MAX_BATCH_SIZE
-            if len(tokens) > batch_token_limit:
+            if len(tokens) > config.token_limit:
                 raise ValueError(
-                    f"Text too long: {len(tokens)} tokens, max is {batch_token_limit} for batch requests"
+                    f"Text too long: {len(tokens)} tokens, max is {config.token_limit}"
                 )
 
             if isinstance(model, StandardizedTransformer):
@@ -407,10 +417,9 @@ class ActivationProcessor:
                 prepend_bos=prepend_bos,
                 truncate=False,
             )[0]
-        batch_token_limit = config.token_limit / MAX_BATCH_SIZE
-        if len(tokens) > batch_token_limit:
+        if len(tokens) > config.token_limit:
             raise ValueError(
-                f"Text too long: {len(tokens)} tokens, max is {batch_token_limit} for batch requests"
+                f"Text too long: {len(tokens)} tokens, max is {config.token_limit}"
             )
 
         if isinstance(model, StandardizedTransformer):
