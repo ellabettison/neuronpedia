@@ -22,9 +22,10 @@ def checkCudaError(device: str | None = None):
 
     if device == "cuda":
         try:
-            free, total = torch.cuda.mem_get_info(torch.device("cuda:0"))
-            mem_used_MB = (total - free) / 1024**2
-            logger.info(f"Memory Used: {mem_used_MB:.2f} MB")
+            for i in range(torch.cuda.device_count()):
+                free, total = torch.cuda.mem_get_info(torch.device(f"cuda:{i}"))
+                mem_used_MB = (total - free) / 1024**2
+                logger.info(f"GPU {i} Memory Used: {mem_used_MB:.2f} MB")
         except RuntimeError as e:
             if "CUDA error" in str(e) or "CUDA assertion" in str(e):
                 logger.error(f"EXITING - CUDA error: {e}")

@@ -85,12 +85,14 @@ from neuronpedia_inference.shared import (  # noqa: F401
     Model,
     replace_tlens_model_id_with_hf_model_id,
 )
-from neuronpedia_inference.utils import checkCudaError
+from neuronpedia_inference.utils import checkCudaError, get_device
 
 # Chatspace Consts
 # llama 3.3 70b awq (quantized) = 1 H200, 0.9
-CHATSPACE_NUM_GPUS = 1
-CHATSPACE_GPU_MEMORY_UTILIZATION = 0.9
+CHATSPACE_NUM_GPUS = int(os.getenv("CHATSPACE_NUM_GPUS", "0"))
+if CHATSPACE_NUM_GPUS == 0:
+    CHATSPACE_NUM_GPUS = torch.cuda.device_count() if torch.cuda.is_available() else 1
+CHATSPACE_GPU_MEMORY_UTILIZATION = float(os.getenv("CHATSPACE_GPU_MEMORY_UTILIZATION", "0.9"))
 
 # Initialize logging at module level
 initialize_logging()
@@ -195,8 +197,8 @@ async def initialize(
         gc.collect()
         torch.set_grad_enabled(False)
         checkCudaError("cpu")
-        # todo: use multiple devices if available
-        device_count = 1
+        _, device_count = get_device()
+        logger.info(f"Detected {device_count} GPU device(s)")
 
         SECRET = os.getenv("SECRET")
 
