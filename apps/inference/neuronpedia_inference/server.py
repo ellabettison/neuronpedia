@@ -197,8 +197,12 @@ async def initialize(
         gc.collect()
         torch.set_grad_enabled(False)
         checkCudaError("cpu")
-        _, device_count = get_device()
-        logger.info(f"Detected {device_count} GPU device(s)")
+        _, detected_device_count = get_device()
+        logger.info(f"Detected {detected_device_count} GPU device(s)")
+        # TransformerLens model parallelism is not stable, so default to 1 device.
+        # Set TLENS_NUM_DEVICES env var to explicitly use more.
+        device_count = int(os.getenv("TLENS_NUM_DEVICES", "1"))
+        logger.info(f"Using {device_count} device(s) for TransformerLens")
 
         SECRET = os.getenv("SECRET")
 
