@@ -197,7 +197,7 @@ class ActivationProcessor:
                 else:
                     _, cache = model.run_with_cache(padded_tokens)
 
-        activation_data = cache[hook_name].to(Config.get_instance().device)
+        activation_data = cache[hook_name].to(Config.get_instance().sae_device)
         feature_activation_data = (
             SAEManager.get_instance().get_sae(request.source).encode(activation_data)
         )

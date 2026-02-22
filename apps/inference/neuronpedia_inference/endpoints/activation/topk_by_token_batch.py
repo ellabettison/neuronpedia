@@ -262,12 +262,13 @@ def get_activations_by_index(
     Get activations organized by feature index.
     Returns a tensor of shape [num_features, num_tokens].
     """
+    config = Config.get_instance()
     if sae_type == "neurons":
-        mlp_activation_data = cache[hook_name].to(Config.get_instance().device)
+        mlp_activation_data = cache[hook_name].to(config.device)
         return torch.transpose(mlp_activation_data[0], 0, 1)
 
-    activation_data = cache[hook_name].to(Config.get_instance().device)
+    activation_data = cache[hook_name].to(config.sae_device)
     feature_activation_data = (
         SAEManager.get_instance().get_sae(selected_layer).encode(activation_data)
     )
-    return torch.transpose(feature_activation_data.squeeze(0), 0, 1)
+    return torch.transpose(feature_activation_data.squeeze(0), 0, 1).to(config.device)

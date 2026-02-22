@@ -40,6 +40,7 @@ class Config:
         steer_special_token_ids: list[int] | None = None,
         nnsight: bool = False,
         chatspace: bool = False,
+        sae_device: str | None = None,
     ):
         self.model_id = model_id
         self.custom_hf_model_id = custom_hf_model_id
@@ -52,6 +53,7 @@ class Config:
         self.valid_completion_types = valid_completion_types
         self.num_layers = num_layers
         self.device = device
+        self.sae_device = sae_device or device
         self.sae_sets = sae_sets
         self.include_sae_patterns = include_sae
         self.exclude_sae_patterns = exclude_sae
@@ -73,6 +75,7 @@ class Config:
             f"  port: {self.port}\n"
             f"  token_limit: {self.token_limit}\n"
             f"  device: {self.device}\n"
+            f"  sae_device: {self.sae_device}\n"
             f"  sae_sets: {self.sae_sets}\n"
             f"  max_loaded_saes: {self.max_loaded_saes}\n"
             f"  include_sae_patterns: {self.include_sae_patterns}\n"

@@ -204,6 +204,16 @@ async def initialize(
         device_count = int(os.getenv("TLENS_NUM_DEVICES", "1"))
         logger.info(f"Using {device_count} device(s) for TransformerLens")
 
+        # Determine SAE device: use a separate GPU if available to free model GPU memory.
+        sae_device_env = os.getenv("SAE_DEVICE", "")
+        if sae_device_env:
+            sae_device = sae_device_env
+        elif torch.cuda.is_available() and detected_device_count >= 2:
+            sae_device = "cuda:1"
+        else:
+            sae_device = args.device
+        logger.info(f"SAE device: {sae_device}")
+
         SECRET = os.getenv("SECRET")
 
         logger.info(f"device in args: {args.device}")
@@ -224,6 +234,7 @@ async def initialize(
             max_loaded_saes=args.max_loaded_saes,
             nnsight=args.nnsight,
             chatspace=args.chatspace,
+            sae_device=sae_device,
         )
         Config._instance = config
 
@@ -236,10 +247,15 @@ async def initialize(
                 else config.model_id
             )
             logger.info("Model to load: %s", model_to_load)
+            # Pin model to a single GPU to avoid pipeline-parallel overhead.
+            # Set NNSIGHT_DEVICE_MAP env var to override (e.g. "auto" for multi-GPU).
+            nnsight_device_map = os.getenv("NNSIGHT_DEVICE_MAP", "cuda:0" if torch.cuda.is_available() else "auto")
+            logger.info(f"nnsight device_map: {nnsight_device_map}")
             model = StandardizedTransformer(
                 replace_tlens_model_id_with_hf_model_id(model_to_load),
                 dtype=STR_TO_DTYPE[config.model_dtype],
                 trust_remote_code=True,
+                device_map=nnsight_device_map,
             )
         elif args.chatspace:
             if not VLLM_AVAILABLE:
@@ -336,8 +352,8 @@ async def initialize(
         )
         checkCudaError()
 
-        logger.info("Loading SAEs...")
-        SAEManager._instance = SAEManager(config.num_layers, args.device)
+        logger.info(f"Loading SAEs on {sae_device}...")
+        SAEManager._instance = SAEManager(config.num_layers, sae_device)
         SAEManager._instance.load_saes()
 
         global initialized

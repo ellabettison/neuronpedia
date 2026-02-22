@@ -505,15 +505,16 @@ class ActivationProcessor:
         hook_name: str,
     ) -> torch.Tensor:
         """Get activations by index for a specific layer and SAE type."""
+        config = Config.get_instance()
         if sae_type == "neurons":
-            mlp_activation_data = cache[hook_name].to(Config.get_instance().device)
+            mlp_activation_data = cache[hook_name].to(config.device)
             return torch.transpose(mlp_activation_data[0], 0, 1)
 
-        activation_data = cache[hook_name].to(Config.get_instance().device)
+        activation_data = cache[hook_name].to(config.sae_device)
         feature_activation_data = (
             SAEManager.get_instance().get_sae(selected_source).encode(activation_data)
         )
-        return torch.transpose(feature_activation_data.squeeze(0), 0, 1)
+        return torch.transpose(feature_activation_data.squeeze(0), 0, 1).to(config.device)
 
     def _process_source_activations(
         self,
