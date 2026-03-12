@@ -131,6 +131,9 @@ COPY apps/inference/vendor /app/apps/inference/vendor/
 COPY apps/inference/pyproject.toml apps/inference/poetry.lock* apps/inference/
 WORKDIR /app/apps/inference
 
+# Remove distutils-installed packages that conflict with poetry's system-wide install
+RUN apt-get purge -y python3-blinker 2>/dev/null || true
+
 # Install only main dependencies
 ENV POETRY_REQUESTS_TIMEOUT=30
 RUN poetry install --only main

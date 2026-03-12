@@ -135,6 +135,10 @@ async def activation_all_batch(
                 torch.cuda.empty_cache()
 
         logger.info("Activations results processed successfully")
+        if torch.cuda.is_available():
+            for i in range(torch.cuda.device_count()):
+                free, total = torch.cuda.mem_get_info(torch.device(f"cuda:{i}"))
+                logger.info(f"Post-inference GPU {i}: {(total - free) / 1024**2:.0f} MB used / {total / 1024**2:.0f} MB total")
 
         # Build response with results array
         response_results = [
