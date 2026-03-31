@@ -75,6 +75,9 @@ from neuronpedia_inference.endpoints.util.sae_topk_by_decoder_cossim import (
     router as sae_topk_by_decoder_cossim_router,
 )
 from neuronpedia_inference.endpoints.util.sae_vector import router as sae_vector_router
+from neuronpedia_inference.endpoints.util.sae_decoder_vectors import (
+    router as sae_decoder_vectors_router,
+)
 from neuronpedia_inference.endpoints.util.similarity_matrix_pred import (
     router as similarity_matrix_pred_router,
 )
@@ -146,6 +149,7 @@ v1_router.include_router(activation_topk_by_token_router)
 v1_router.include_router(activation_topk_by_token_batch_router)
 v1_router.include_router(sae_topk_by_decoder_cossim_router)
 v1_router.include_router(sae_vector_router)
+v1_router.include_router(sae_decoder_vectors_router)
 v1_router.include_router(tokenize_router)
 v1_router.include_router(similarity_matrix_pred_router)
 v1_router.include_router(activation_source_router)
