@@ -106,6 +106,9 @@ TLENS_MODEL_ID_TO_HF_MODEL_ID = {
     "gpt2-small": "openai-community/gpt2",
     "gemma-2-2b": "google/gemma-2-2b",
     "gemma-2-2b-it": "google/gemma-2-2b-it",
+    "gemma-2-9b": "google/gemma-2-9b",
+    "gemma-2-9b-it": "google/gemma-2-9b-it",
+    "gemma-3-4b-it": "google/gemma-3-4b-it",
     "gemma-3-27b-it": "google/gemma-3-27b-it",
 }
 

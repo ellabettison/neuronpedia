@@ -100,9 +100,7 @@ class Config:
         config_json = config_to_json(
             directory_df,
             selected_sets_neuronpedia=self.sae_sets,
-            selected_model=(
-                self.custom_hf_model_id if self.custom_hf_model_id else self.model_id
-            ),
+            selected_model=self.model_id,
         )
         return config_json  # noqa: RET504
 
