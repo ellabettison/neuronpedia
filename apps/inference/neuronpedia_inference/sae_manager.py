@@ -69,11 +69,7 @@ class SAEManager:
         for sae_id in all_sae_ids:
             if sae_id not in starting_saes:
                 self.load_sae(
-                    (
-                        self.config.custom_hf_model_id
-                        if self.config.custom_hf_model_id
-                        else self.config.model_id
-                    ),
+                    self.config.model_id,
                     sae_id,
                 )
                 self.unload_sae(sae_id)
@@ -81,11 +77,7 @@ class SAEManager:
         # Load starting SAEs
         for sae_id in starting_saes:
             self.load_sae(
-                (
-                    self.config.custom_hf_model_id
-                    if self.config.custom_hf_model_id
-                    else self.config.model_id
-                ),
+                self.config.model_id,
                 sae_id,
             )
 
