@@ -164,11 +164,7 @@ class SAEManager:
     def get_sae(self, source: str) -> Any:
         if source not in self.loaded_saes:
             self.load_sae(
-                (
-                    self.config.custom_hf_model_id
-                    if self.config.custom_hf_model_id
-                    else self.config.model_id
-                ),
+                self.config.model_id,
                 source,
             )
         else:
