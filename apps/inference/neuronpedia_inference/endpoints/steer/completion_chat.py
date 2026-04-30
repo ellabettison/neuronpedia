@@ -28,6 +28,30 @@ from neuronpedia_inference_client.models.steer_completion_chat_post_request impo
 from nnterp import StandardizedTransformer
 from transformer_lens import HookedTransformer
 
+# generate_stream shim for HookedTransformer (no vLLM streaming)
+if not hasattr(HookedTransformer, 'generate_stream'):
+    def _ht_generate_stream(self, input, max_tokens_per_yield=1, stop_at_eos=True,
+                             do_sample=False, return_logits=False, temperature=1.0, **kwargs):
+        n_new = int(kwargs.get('max_new_tokens', 200) or 200)
+        gen_kw = {}
+        if do_sample and temperature != 1.0:
+            gen_kw['temperature'] = temperature
+        output = self.generate(
+            input=input, max_new_tokens=n_new, do_sample=do_sample,
+            stop_at_eos=stop_at_eos, return_type='input', verbose=False, **gen_kw)
+        input_len = input.shape[-1]
+        generated = output[:, input_len:]
+        dummy = torch.zeros(generated.shape[0], 1, dtype=torch.long, device=generated.device)
+        result = torch.cat([dummy, generated], dim=-1)
+        if return_logits:
+            dummy_logits = torch.zeros(generated.shape[0], generated.shape[1], self.cfg.d_vocab, device=generated.device)
+            yield result, dummy_logits
+        else:
+            yield result
+    HookedTransformer.generate_stream = _ht_generate_stream
+
+
+
 from neuronpedia_inference.config import Config
 from neuronpedia_inference.endpoints.persona.monitor import (
     _truncate_content,
