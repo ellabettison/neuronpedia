@@ -70,6 +70,8 @@ services:
         CUSTOM_CA_BUNDLE: ${CUSTOM_CA_BUNDLE:-.nocustomca}
     ports:
       - "5002:5002"
+    volumes:
+      - ../apps/inference/patches/pretrained_saes.yaml:/usr/local/lib/python3.12/site-packages/sae_lens/pretrained_saes.yaml:ro
     env_file:
       - ${ENV_FILE:-${MODEL_SOURCESET:+.env.inference.${MODEL_SOURCESET}}.env}
     environment:
