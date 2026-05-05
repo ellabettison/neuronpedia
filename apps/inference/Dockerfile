@@ -138,6 +138,9 @@ RUN apt-get purge -y python3-blinker 2>/dev/null || true
 ENV POETRY_REQUESTS_TIMEOUT=30
 RUN poetry install --only main
 
+# Patch sae_lens pretrained_saes.yaml: add missing neuronpedia IDs for gemma-3-12b-it
+COPY apps/inference/patches/pretrained_saes.yaml /usr/local/lib/python3.12/site-packages/sae_lens/pretrained_saes.yaml
+
 # Now copy the rest of the application code
 COPY apps/inference /app/apps/inference/
 
