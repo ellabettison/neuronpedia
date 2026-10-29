@@ -165,6 +165,9 @@ inference-localhost-dev: ## Inference: Localhost Environment - Run (Development 
 inference-localhost-dev-gpu: ## Inference: Localhost Environment - Run (Development Build with CUDA). Usage: make inference-localhost-dev-gpu [MODEL_SOURCESET=gpt2-small.res-jb] [AUTORELOAD=1] [USE_LOCAL_HF_CACHE=1]
 	$(MAKE) inference-localhost-dev ENABLE_GPU=1 MODEL_SOURCESET=$(MODEL_SOURCESET) AUTORELOAD=$(AUTORELOAD)
 
+inference-colab-dev: ## Inference: Colab - Run without Docker (Colab can't run containers). Usage: make inference-colab-dev MODEL_SOURCESET=gemma-2-9b-it.gemmascope-res-16k
+	./run_colab.sh $(MODEL_SOURCESET)
+
 inference-list-configs: ## Inference: List Configurations (possible values for MODEL_SOURCESET)
 	@echo "\nAvailable Inference Configurations (.env.inference.*)\n================================================\n"
 	@for config in $$(ls .env.inference.*); do \

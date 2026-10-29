@@ -110,6 +110,7 @@ TLENS_MODEL_ID_TO_HF_MODEL_ID = {
     "gemma-2-9b-it": "google/gemma-2-9b-it",
     "gemma-3-4b-it": "google/gemma-3-4b-it",
     "gemma-3-27b-it": "google/gemma-3-27b-it",
+    "llama3-8b-it": "meta-llama/Meta-Llama-3-8B-Instruct",
 }
 
 
