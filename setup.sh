@@ -1,5 +1,6 @@
 pipx install poetry
 pipx install uv
+uv pip install poetry
 # Add Docker's official GPG key:
 sudo apt-get update
 sudo apt-get install ca-certificates curl
