@@ -7,6 +7,9 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
+# Use poetry's own env, not a caller's active venv (sae-jb server start runs from sae-jailbreaks/.venv)
+if [ -n "${VIRTUAL_ENV:-}" ]; then PATH="${PATH//$VIRTUAL_ENV\/bin:/}"; unset VIRTUAL_ENV; fi
+
 MODEL_SOURCESET="${1:?usage: $0 <sourceset> (see make inference-list-configs)}"
 if [ ! -f ".env.inference.$MODEL_SOURCESET" ]; then
   echo "Error: .env.inference.$MODEL_SOURCESET not found. Run 'make inference-list-configs' to see available configurations."
@@ -14,7 +17,8 @@ if [ ! -f ".env.inference.$MODEL_SOURCESET" ]; then
 fi
 
 # Same as the compose bind mount: use the patched SAE registry
-SAE_LENS_DIR=$(cd apps/inference && poetry run python -c "import os, sae_lens; print(os.path.dirname(sae_lens.__file__))" 2>/dev/null)
+SAE_LENS_DIR=$(cd apps/inference && poetry run python -c "import os, sae_lens; print(os.path.dirname(sae_lens.__file__))" 2>/dev/null) \
+  || { echo "Error: inference env not installed; run setup_colab.sh first"; exit 1; }
 cp apps/inference/patches/pretrained_saes.yaml "$SAE_LENS_DIR/pretrained_saes.yaml"
 
 # Same env as the container: model config, plus HF_TOKEN and SECRET
